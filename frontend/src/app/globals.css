@@ -1,22 +1,85 @@
 @import "tailwindcss";
 
+/* ========================================
+   温かみのあるカラーパレット
+   ======================================== */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* ベースカラー - クリーム色 */
+  --color-cream-50: #faf8f5;
+  --color-cream-100: #f5f1eb;
+  --color-cream-200: #ebe4d9;
+
+  /* 温かみのあるベージュ */
+  --color-warm-50: #faf6f0;
+  --color-warm-100: #f5ede3;
+  --color-warm-200: #e8dccf;
+  --color-warm-300: #d4c0a5;
+
+  /* テラコッタ（アクセント） */
+  --color-terracotta-50: #fff5f2;
+  --color-terracotta-100: #ffe8e1;
+  --color-terracotta-200: #ffcdb8;
+  --color-terracotta-300: #ff9f7a;
+  --color-terracotta-400: #f4725c;
+  --color-terracotta-500: #e85d3f;
+  --color-terracotta-600: #d44830;
+
+  /* ソフトコーラル */
+  --color-coral-50: #fff0ee;
+  --color-coral-100: #ffe0da;
+  --color-coral-200: #ffb8a8;
+  --color-coral-300: #ff8066;
+
+  /* テキストカラー */
+  --color-text-primary: #2d2a26;
+  --color-text-secondary: #6b6560;
+  --color-text-tertiary: #9a938c;
+
+  /* 背景色 */
+  --background: #faf8f5;
+  --foreground: #2d2a26;
+
+  /* ボーダー */
+  --color-border: #e8dccf;
+
+  /* シャドウ */
+  --shadow-soft: 0 2px 8px rgba(45, 42, 38, 0.04);
+  --shadow-medium: 0 4px 16px rgba(45, 42, 38, 0.08);
+  --shadow-elevated: 0 8px 32px rgba(45, 42, 38, 0.12);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --font-sans: var(--font-noto-sans);
+  --font-display: var(--font-zen-kaku);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* カスタムカラー */
+  --color-cream-50: var(--color-cream-50);
+  --color-cream-100: var(--color-cream-100);
+  --color-cream-200: var(--color-cream-200);
+
+  --color-warm-50: var(--color-warm-50);
+  --color-warm-100: var(--color-warm-100);
+  --color-warm-200: var(--color-warm-200);
+  --color-warm-300: var(--color-warm-300);
+
+  --color-terracotta-50: var(--color-terracotta-50);
+  --color-terracotta-100: var(--color-terracotta-100);
+  --color-terracotta-200: var(--color-terracotta-200);
+  --color-terracotta-300: var(--color-terracotta-300);
+  --color-terracotta-400: var(--color-terracotta-400);
+  --color-terracotta-500: var(--color-terracotta-500);
+  --color-terracotta-600: var(--color-terracotta-600);
+
+  --color-coral-50: var(--color-coral-50);
+  --color-coral-100: var(--color-coral-100);
+  --color-coral-200: var(--color-coral-200);
+  --color-coral-300: var(--color-coral-300);
+
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-tertiary: var(--color-text-tertiary);
 }
 
 * {
@@ -34,5 +97,117 @@ body {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-noto-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ========================================
+   アクセシブルなフォーカス状態
+   ======================================== */
+*:focus-visible {
+  outline: 2px solid var(--color-terracotta-400);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--color-terracotta-400);
+  outline-offset: 2px;
+}
+
+/* ========================================
+   柔らかいスクロールバー
+   ======================================== */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-cream-100);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-warm-300);
+  border-radius: 4px;
+  transition: background 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-terracotta-300);
+}
+
+/* ========================================
+   アニメーション
+   ======================================== */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.4s ease-out;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.3s ease-out;
+}
+
+/* ========================================
+   ユーティリティクラス
+   ======================================== */
+.texture-overlay {
+  position: relative;
+}
+
+.texture-overlay::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  opacity: 0.02;
+  pointer-events: none;
+}
+
+.soft-shadow {
+  box-shadow: var(--shadow-soft);
+}
+
+.medium-shadow {
+  box-shadow: var(--shadow-medium);
+}
+
+.elevated-shadow {
+  box-shadow: var(--shadow-elevated);
 }

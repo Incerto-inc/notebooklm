@@ -1,6 +1,6 @@
 export interface Source {
   id: string;
-  name: string;
+  title: string; // タイトル
   type: string;
   selected: boolean;
   content: string;
