@@ -51,6 +51,9 @@ frontend/
 ├── src/
 │   ├── app/
 │   │   ├── api/           # APIルート (Next.js App Router)
+│   │   │   ├── jobs/            # ジョブキューシステム
+│   │   │   │   ├── route.ts           # ジョブ作成
+│   │   │   │   └── [jobId]/route.ts    # ジョブステータス確認
 │   │   │   ├── analyze-video/   # YouTube動画のAI分析
 │   │   │   ├── analyze-file/    # ファイルのAI分析
 │   │   │   ├── chat/            # AIチャット（ストリーミング対応）
@@ -67,19 +70,21 @@ frontend/
 │   │   └── VideoUploadDialog.tsx # 動画URL入力ダイアログ
 │   ├── hooks/           # カスタムフック
 │   │   ├── useLocalStorage.ts     # localStorage管理
-│   │   └── useSupabaseData.ts     # Supabaseデータ管理
+│   │   ├── useSupabaseData.ts     # Supabaseデータ管理
+│   │   └── useJobPolling.ts       # ジョブポーリング（非同期AI処理用）
 │   └── lib/
-│       ├── openrouter.ts         # OpenRouter APIクライアント
-│       ├── prisma.ts             # Prismaクライアント（シングルトン）
+│       ├── job-processor.ts       # バックグラウンドジョブプロセッサー
+│       ├── openrouter.ts          # OpenRouter APIクライアント
+│       ├── prisma.ts              # Prismaクライアント（シングルトン）
 │       ├── supabase/
-│       │   ├── client.ts         # Supabaseクライアント
-│       │   └── types.ts          # Supabase型定義（自動生成）
-│       └── types.ts              # アプリケーション型定義
+│       │   ├── client.ts          # Supabaseクライアント
+│       │   └── types.ts           # Supabase型定義（自動生成）
+│       └── types.ts               # アプリケーション型定義
 e2e/                    # Playwright E2Eテスト
 prisma/
-└── schema.prisma       # データベーススキーマ定義
-supabase/               # Supabase設定（ローカル開発環境）
+├── schema.prisma       # データベーススキーマ定義
 └── migrations/         # データベースマイグレーション
+supabase/               # Supabase設定（ローカル開発環境）
 playwright.config.ts    # Playwright設定（ルート）
 .env                    # 環境変数（Git管理外）
 ```
@@ -89,11 +94,72 @@ playwright.config.ts    # Playwright設定（ルート）
 ### データフロー
 
 1. **インプット**: ユーザーは「スタイル」（YouTuberのノウハウ）と「ソース」（参考動画/資料）を追加
-2. **AI処理**: OpenRouter API経由でAI分析を実行
+2. **AI処理（非同期ジョブキューシステム）**: OpenRouter API経由でAI分析を実行
    - YouTube動画URL → AIがスタイル/内容を分析
    - ファイルアップロード → AIがテキスト/PDFを解析
+   - **すべてのAI処理はサーバーサイドで非同期実行**（クライアントはポーリングで進捗を取得）
 3. **対話**: チャットでAIと対話（ストリーミング対応）
 4. **アウトプット**: 収集した情報を元に動画シナリオを生成
+
+### 非同期AI処理システム（ジョブキューアーキテクチャ）
+
+**概要**:
+AI処理を完全非同期化し、ユーザー体験を改善するジョブキューシステムを採用しています。
+
+**アーキテクチャ図**:
+```
+クライアント                    サーバー                   Worker
+   |                            |                          |
+   |--(1)ジョブ作成リクエスト-->|                          |
+   |                            |--(2)Jobレコード作成-->[DB]
+   |<--(3)jobIdを即座に返却-----|                          |
+   |                            |                          |
+   |--(4)ポーリング(2秒毎)----->|                          |
+   |                            |--(5)ステータス確認--->[DB]
+   |<--(6)processing-----------|                          |
+   |                            |                          |
+   |--(7)ポーリング------------>|        |--(8)AI処理--->[OpenRouter]
+   |                            |        |<--(9)結果-----|
+   |                            |--(10)結果保存----->[DB]
+   |                            |                          |
+   |--(11)ポーリング----------->|                          |
+   |<--(12)completed + 結果------|                          |
+```
+
+**ジョブステータス**:
+- `PENDING`: 処理待ち
+- `PROCESSING`: 処理中
+- `COMPLETED`: 完了
+- `FAILED`: 失敗（リトライ可能）
+- `CANCELLED`: キャンセル済み
+
+**ジョブタイプ**:
+- `ANALYZE_VIDEO`: YouTube動画の分析
+- `ANALYZE_FILE`: ファイル（PDF/テキスト）の分析
+- `GENERATE_SCENARIO`: 動画シナリオの生成
+
+**APIエンドポイント**:
+- `POST /api/jobs`: ジョブ作成（即座にjobIdを返却）
+- `GET /api/jobs/[jobId]`: ジョブステータス確認（ポーリング用）
+
+**フロントエンド実装**:
+- `useJobPolling.ts`: カスタムフックでジョブステータスをポーリング（2秒間隔）
+- `page.tsx`: AI処理関数が非同期化され、ジョブ作成後に即座にUIを更新
+  - `handleVideoSubmit`: 動画分析を非同期実行
+  - `handleFileSelect`: ファイル分析を非同期実行
+  - `handleGenerateScenario`: シナリオ生成を非同期実行
+
+**サーバーサイド実装**:
+- `lib/job-processor.ts`: バックグラウンドジョブプロセッサー
+  - 自動リトライ（指数バックオフ、最大3回、最大30秒）
+  - 5分間のタイムアウト設定
+  - エラーハンドリング（ネットワークエラーはリトライ、その他は即時失敗）
+
+**UXの改善**:
+- AI処理中もユーザーは他の操作が可能
+- 「AIで分析中...」のローディング表示
+- 完了時に自動的に結果を表示
+- エラー発生時の適切なエラーメッセージ表示
 
 ### データ管理アーキテクチャ
 
@@ -114,22 +180,35 @@ playwright.config.ts    # Playwright設定（ルート）
 
 ### Prismaスキーマ設計
 
-4つの主要モデル（`prisma/schema.prisma`）:
+5つの主要モデル（`prisma/schema.prisma`）:
 - **Style**: YouTuberのノウハウ（編集テクニック、話し方等）
 - **Source**: 参考動画/資料（要約、ポイント）
 - **Scenario**: 動画シナリオ
 - **ChatMessage**: チャット履歴
+- **Job**: 非同期AI処理ジョブ（ジョブキューシステム用）
 
-全モデル共通のフィールド:
+**Jobモデルのフィールド**:
+- `id`: UUID（主キー）
+- `type`: ジョブタイプ（`ANALYZE_VIDEO`, `ANALYZE_FILE`, `GENERATE_SCENARIO`）
+- `status`: ジョブステータス（`PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`, `CANCELLED`）
+- `input`: 処理入力パラメータ（JSON）
+- `result`: 処理結果（JSON、オプション）
+- `error`: エラーメッセージ（オプション）
+- `retryCount`: リトライ回数（デフォルト0）
+- `maxRetries`: 最大リトライ回数（デフォルト3）
+- `priority`: 優先度（デフォルト0）
+- `startedAt`: 処理開始時刻
+- `completedAt`: 処理完了時刻
+- `createdAt`: ジョブ作成時刻
+- `updatedAt`: 最終更新時刻
+
+**Style/Source/Scenario/ChatMessageモデル共通のフィールド**:
 - `id`: 主キー（文字列）
 - `title`, `type`, `content`: コンテンツ
 - `selected`: UI選択状態
-- `createdAt`: タイムスタンプ形式（`yyyy年mm月dd日ss.mmm.md`）
-- `videoUrl`: YouTube URL（Style/Sourceのみ、オプション）
-
-**重要**: `createdAt`と`createdAtDateTime`の2つの日付フィールドが存在：
-- `createdAt`: ファイル名形式の文字列（UI表示用）
+- `createdAt`: タイムスタンプ形式（`yyyy年mm月dd日HH.mm.md`）
 - `createdAtDateTime`: PostgreSQL DateTime（ソート用）
+- `videoUrl`: YouTube URL（Style/Sourceのみ、オプション）
 
 ### OpenRouter統合
 
@@ -227,8 +306,38 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 4. **Prisma Client**: `lib/prisma.ts`でシングルトンパターン実装（ホットリロード対応）
 5. **Hydrationエラー**: クライアントサイドのみのコードは`mounted`チェックで保護
 6. **データフロー**: Supabase → API Route → Prisma → フロントエンド（`useSupabaseData`）
-7. **ローディング状態**: AI処理中は`loading: true`を設定してスピナーを表示
+7. **非同期AI処理**: AI処理はすべてジョブキューシステム経由で非同期実行
+   - クライアントは`/api/jobs`でジョブ作成
+   - ポーリングで`/api/jobs/[jobId]`を定期的に確認
+   - UIは即座に更新され、バックグラウンドで処理完了を待機
 8. **ストリーミング**: チャットはリアルタイムでストリーミングされるため、状態更新に注意
+
+## Vercelデプロイ時の注意点
+
+**Prisma Client生成設定**（`prisma/schema.prisma`）:
+```prisma
+generator client {
+  provider = "prisma-client-js"
+  output   = "../frontend/node_modules/.prisma/client"
+}
+```
+
+**重要ポイント**:
+- Prisma Clientの出力先を`.prisma/client`に設定（`@prisma/client`ではない）
+- モノレpo構成（Prismaはルート、Next.jsは`frontend/`サブディレクトリ）に対応
+- `postinstall`スクリプトで自動生成：`cd .. && npx prisma generate`
+- 環境変数`DATABASE_URL`はVercelダッシュボードから設定
+
+**Vercelへのデプロイ手順**:
+1. GitHubリポジトリと連携
+2. 環境変数を設定（DATABASE_URL, OPENROUTER_API_KEY等）
+3. ビルドコマンド: `cd frontend && bun run build`
+4. 出力ディレクトリ: `.next`
+
+**トラブルシューティング**:
+- `@prisma/client did not initialize yet`: Prisma Clientの出力先を確認
+- `Cannot find module 'dotenv/config'`: `prisma.config.ts`を削除（Vercelは自動で環境変数を設定）
+- `Generating client into ... is not allowed`: 出力先を`.prisma/client`に変更
 
 ## 追加のドキュメント
 
@@ -236,3 +345,9 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 - `DESIGN.md`: NotebookLM UIの詳細な設計思想
 - `docs/openrouter-tool-calling.md`: OpenRouterのツール呼び出し機能
 - `docs/openrouter-video-inputs.md`: OpenRouterの動画入力機能
+
+**関連スキル**:
+- `prisma-vercel-deployment`: Prisma + Vercel デプロイのトラブルシューティング手順
+  - モノレポ構成でのPrisma Client生成
+  - Vercelデプロイ時のよくあるエラーと解決策
+  - 環境変数設定のベストプラクティス

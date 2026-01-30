@@ -1,5 +1,21 @@
 import { prisma } from './prisma';
 import { OpenRouter } from '@openrouter/sdk';
+import type { ChatGenerationParamsPluginFileParser } from '@openrouter/sdk/models';
+import type { AnalyzeVideoInput, AnalyzeFileInput, GenerateScenarioInput, JobError } from './types';
+import { isAnalyzeVideoInput, isAnalyzeFileInput, isGenerateScenarioInput } from './types';
+
+// OpenRouter SDKに含まれていないファイルコンテンツ型を拡張
+type FileContentItem = {
+  type: 'file';
+  file: {
+    filename: string;
+    fileData: string;
+  };
+};
+
+type ExtendedMessageContent = Array<
+  { type: 'text'; text: string } | FileContentItem
+>;
 
 const openRouter = new OpenRouter({
   apiKey: process.env.OPENROUTER_API_KEY || '',
@@ -61,19 +77,30 @@ async function executeAIProcessing(jobId: string) {
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job) throw new Error('Job not found');
 
+  const input = job.input;
+
   switch (job.type) {
     case 'ANALYZE_VIDEO':
-      return await processAnalyzeVideo(job.input);
+      if (!isAnalyzeVideoInput(input)) {
+        throw new Error('Invalid input for ANALYZE_VIDEO');
+      }
+      return await processAnalyzeVideo(input);
     case 'ANALYZE_FILE':
-      return await processAnalyzeFile(job.input);
+      if (!isAnalyzeFileInput(input)) {
+        throw new Error('Invalid input for ANALYZE_FILE');
+      }
+      return await processAnalyzeFile(input);
     case 'GENERATE_SCENARIO':
-      return await processGenerateScenario(job.input);
+      if (!isGenerateScenarioInput(input)) {
+        throw new Error('Invalid input for GENERATE_SCENARIO');
+      }
+      return await processGenerateScenario(input);
     default:
       throw new Error('Unknown job type');
   }
 }
 
-async function processAnalyzeVideo(input: any) {
+async function processAnalyzeVideo(input: AnalyzeVideoInput) {
   const { url, mode } = input;
   const prompt = mode === 'style'
     ? `このYouTuber動画のスタイルを分析してください。編集テクニック、話し方、雰囲気、構成を日本語でMarkdown形式で抽出してください。`
@@ -97,44 +124,46 @@ async function processAnalyzeVideo(input: any) {
   return { content };
 }
 
-async function processAnalyzeFile(input: any) {
+async function processAnalyzeFile(input: AnalyzeFileInput) {
   // PDFファイルの場合（base64エンコード）
   if (input.fileData && input.fileType === 'application/pdf') {
     const prompt = input.mode === 'style'
       ? `このPDFドキュメントのスタイルを分析してください。構成、トーン、フォーマット、重要なポイントを日本語でMarkdown形式で抽出してください。`
       : `このPDFドキュメントの内容を要約してください。主要なトピック、キーポイントを日本語でMarkdown形式で抽出してください。`;
 
+    const content: ExtendedMessageContent = [
+      { type: 'text', text: prompt },
+      {
+        type: 'file',
+        file: {
+          filename: input.filename || 'document.pdf',
+          fileData: input.fileData,
+        },
+      },
+    ];
+
+    const fileParserPlugin: ChatGenerationParamsPluginFileParser = {
+      id: 'file-parser',
+      pdf: {
+        engine: 'pdf-text',
+      },
+    };
+
+    // OpenRouter SDKはファイル型を正式サポートしていないため型変換
     const result = await openRouter.chat.send({
       model: CHAT_MODEL,
       messages: [
         {
           role: 'user',
-          content: [
-            { type: 'text', text: prompt },
-            {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              type: 'file' as any,
-              file: {
-                filename: input.filename,
-                fileData: input.fileData,
-              },
-            },
-          ] as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+          content: content as never, // TODO: SDKがファイル型をサポートしたら削除
         },
       ],
       stream: false,
-      plugins: [
-        {
-          id: 'file-parser',
-          pdf: {
-            engine: 'pdf-text',
-          },
-        },
-      ] as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+      plugins: [fileParserPlugin],
     });
 
-    const content = (result.choices[0]?.message?.content as string) || '';
-    return { content };
+    const responseContent = (result.choices[0]?.message?.content as string) || '';
+    return { content: responseContent };
   }
 
   // テキストファイルの場合
@@ -161,19 +190,19 @@ async function processAnalyzeFile(input: any) {
   throw new Error('Invalid file input');
 }
 
-async function processGenerateScenario(input: any) {
+async function processGenerateScenario(input: GenerateScenarioInput) {
   const { styles, sources, chatHistory } = input;
 
   const styleContents = styles
-    .filter((s: any) => s.selected)
-    .map((s: any) => `# ${s.name}\n${s.content}`);
+    .filter((s) => s.selected)
+    .map((s) => `# ${s.name}\n${s.content}`);
 
   const sourceContents = sources
-    .filter((s: any) => s.selected)
-    .map((s: any) => `# ${s.name}\n${s.content}`);
+    .filter((s) => s.selected)
+    .map((s) => `# ${s.name}\n${s.content}`);
 
   const chatText = chatHistory
-    .map((m: any) => `${m.role}: ${m.content}`)
+    .map((m) => `${m.role}: ${m.content}`)
     .join('\n\n');
 
   const prompt = `以下の情報を元に、YouTube動画のシナリオを作成してください。
@@ -204,7 +233,7 @@ ${chatText}
   return { scenario };
 }
 
-async function handleJobError(jobId: string, error: any) {
+async function handleJobError(jobId: string, error: JobError | Error) {
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job) return;
 
@@ -235,10 +264,14 @@ async function handleJobError(jobId: string, error: any) {
   }
 }
 
-function isRetryableError(error: any): boolean {
-  if (error.code === 'NETWORK_TIMEOUT') return true;
-  if (error.status >= 500 && error.status < 600) return true;
-  if (error.message?.includes('ECONNRESET')) return true;
-  if (error.message?.includes('ETIMEDOUT')) return true;
+function isRetryableError(error: JobError | Error): boolean {
+  const errorMessage = error instanceof Error ? error.message : error.message;
+  const errorCode = 'code' in error ? error.code : undefined;
+  const errorStatus = 'status' in error ? error.status : undefined;
+
+  if (errorCode === 'NETWORK_TIMEOUT') return true;
+  if (errorStatus && errorStatus >= 500 && errorStatus < 600) return true;
+  if (errorMessage?.includes('ECONNRESET')) return true;
+  if (errorMessage?.includes('ETIMEDOUT')) return true;
   return false;
 }

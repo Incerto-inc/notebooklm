@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { Source } from '@/lib/types';
 
 interface JobStatus {
   id: string;
@@ -18,6 +19,19 @@ interface UseJobPollingResult {
   stopPolling: () => void;
 }
 
+interface JobInfo {
+  itemId: string;
+  targetTab: 'style' | 'sources' | 'scenario';
+  loadingItem: Source;
+}
+
+interface UseMultiJobPollingOptions {
+  onJobComplete?: (jobId: string, jobInfo: JobInfo, result: any) => void;
+  onJobError?: (jobId: string, jobInfo: JobInfo, error: string) => void;
+  interval?: number;
+}
+
+// 単一ジョブのポーリング（既存機能）
 export function useJobPolling(interval: number = 2000): UseJobPollingResult {
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
@@ -52,20 +66,17 @@ export function useJobPolling(interval: number = 2000): UseJobPollingResult {
         setJobStatus(data);
         setError(null);
 
-        // ジョブが完了または失敗したらポーリングを停止
         if (data.status === 'COMPLETED' || data.status === 'FAILED' || data.status === 'CANCELLED') {
           setIsPolling(false);
         }
-      } catch (err: any) {
-        setError(err.message);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        setError(message);
         setIsPolling(false);
       }
     };
 
-    // 初回チェック
     checkStatus();
-
-    // 定期的なポーリング
     const intervalId = setInterval(checkStatus, interval);
 
     return () => clearInterval(intervalId);
@@ -79,3 +90,80 @@ export function useJobPolling(interval: number = 2000): UseJobPollingResult {
     stopPolling,
   };
 }
+
+// 複数ジョブのポーリング（新機能）
+export function useMultiJobPolling(options: UseMultiJobPollingOptions = {}) {
+  const { onJobComplete, onJobError, interval = 2000 } = options;
+  const [activeJobs, setActiveJobs] = useState<Map<string, JobInfo>>(new Map());
+  const isInitializedRef = useRef(false);
+
+  const addJob = useCallback((jobId: string, jobInfo: JobInfo) => {
+    setActiveJobs(prev => new Map(prev).set(jobId, jobInfo));
+  }, []);
+
+  const removeJob = useCallback((jobId: string) => {
+    setActiveJobs(prev => {
+      const updated = new Map(prev);
+      updated.delete(jobId);
+      return updated;
+    });
+  }, []);
+
+  // ジョブのポーリング処理
+  useEffect(() => {
+    if (!isInitializedRef.current) {
+      isInitializedRef.current = true;
+      return;
+    }
+
+    const intervalId = setInterval(async () => {
+      const jobEntries = Array.from(activeJobs.entries());
+      if (jobEntries.length === 0) return;
+
+      const jobsToRemove: string[] = [];
+
+      for (const [jobId, jobInfo] of jobEntries) {
+        try {
+          const response = await fetch(`/api/jobs/${jobId}`);
+          if (!response.ok) {
+            jobsToRemove.push(jobId);
+            continue;
+          }
+
+          const job = await response.json();
+
+          if (job.status === 'COMPLETED') {
+            onJobComplete?.(jobId, jobInfo, job.result);
+            jobsToRemove.push(jobId);
+          } else if (job.status === 'FAILED') {
+            onJobError?.(jobId, jobInfo, job.error || '不明なエラーが発生しました');
+            jobsToRemove.push(jobId);
+          }
+        } catch (error) {
+          console.error(`Polling error for job ${jobId}:`, error);
+          jobsToRemove.push(jobId);
+        }
+      }
+
+      // 完了したジョブを削除
+      if (jobsToRemove.length > 0) {
+        setActiveJobs(prev => {
+          const updated = new Map(prev);
+          for (const jobId of jobsToRemove) {
+            updated.delete(jobId);
+          }
+          return updated;
+        });
+      }
+    }, interval);
+
+    return () => clearInterval(intervalId);
+  }, [activeJobs, onJobComplete, onJobError, interval]);
+
+  return {
+    activeJobs,
+    addJob,
+    removeJob,
+  };
+}
+
