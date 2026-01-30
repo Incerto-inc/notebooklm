@@ -26,21 +26,16 @@ jobs:
           cd frontend && bun install
 
       - name: Generate Prisma Client
-        run: |
-          cd frontend
-          bunx prisma generate
+        run: bunx prisma generate
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       - name: Run Prisma Migrate Deploy
-        run: |
-          cd frontend
-          bunx prisma migrate deploy
+        run: bunx prisma migrate deploy
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       - name: Verify migration
         run: |
-          cd frontend
           echo "Migration completed successfully!"
           echo "Database schema is now up to date."
