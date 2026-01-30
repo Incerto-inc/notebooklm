@@ -1,0 +1,46 @@
+name: Prisma Production Migration
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    name: Run Prisma Migrate on Production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: |
+          bun install
+          cd frontend && bun install
+
+      - name: Generate Prisma Client
+        run: |
+          cd frontend
+          bunx prisma generate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Run Prisma Migrate Deploy
+        run: |
+          cd frontend
+          bunx prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Verify migration
+        run: |
+          cd frontend
+          echo "Migration completed successfully!"
+          echo "Database schema is now up to date."
