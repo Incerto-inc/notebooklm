@@ -1,0 +1,66 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// スタイル情報 - YouTuberのノウハウ
+model Style {
+  id        String   @id
+  title     String
+  type      String
+  selected  Boolean  @default(false)
+  content   String   @db.Text
+  createdAt String   @default("")
+  videoUrl  String?  @map("video_url")
+  updatedAt DateTime @updatedAt
+  createdAtDateTime DateTime @default(now()) @map("created_at")
+
+  @@map("styles")
+}
+
+// ソース情報 - 参考動画/資料
+model Source {
+  id        String   @id
+  title     String
+  type      String
+  selected  Boolean  @default(false)
+  content   String   @db.Text
+  createdAt String   @default("")
+  videoUrl  String?  @map("video_url")
+  updatedAt DateTime @updatedAt
+  createdAtDateTime DateTime @default(now()) @map("created_at")
+
+  @@map("sources")
+}
+
+// シナリオ - 動画シナリオ
+model Scenario {
+  id        String   @id
+  title     String
+  type      String
+  selected  Boolean  @default(false)
+  content   String   @db.Text
+  createdAt String   @default("")
+  updatedAt DateTime @updatedAt
+  createdAtDateTime DateTime @default(now()) @map("created_at")
+
+  @@map("scenarios")
+}
+
+// チャットメッセージ
+model ChatMessage {
+  id        String   @id
+  role      String // 'user' | 'assistant' | 'system'
+  content   String   @db.Text
+  timestamp String   @default("")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("chat_messages")
+}

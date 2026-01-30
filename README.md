@@ -56,8 +56,8 @@
 
 ```bash
 cd frontend
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
 ブラウザで http://localhost:3000 にアクセスしてください。

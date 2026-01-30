@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { uid } from "uid";
 import { VideoUploadDialog } from "@/components/VideoUploadDialog";
 import { FileUploadZone } from "@/components/FileUploadZone";
-import { loadFromLocalStorage, saveToLocalStorage } from "@/hooks/useLocalStorage";
+import { useSupabaseData } from "@/hooks/useSupabaseData";
 
 interface Source {
   id: string;
@@ -17,13 +17,39 @@ interface Source {
   loading?: boolean; // 読み込み中かどうか
 }
 
+interface ChatMessage {
+  id: string;
+  role: string;
+  content: string;
+  timestamp: string;
+}
+
 export default function NotebookLMPage() {
-  // 最初は空の状態で初期化（Hydrationエラー回避）
-  const [sources, setSources] = useState<Array<Source>>([]);
-  const [styles, setStyles] = useState<Array<Source>>([]);
-  const [scenarios, setScenarios] = useState<Array<Source>>([]);
-  const [chatMessages, setChatMessages] = useState<Array<{ role: string; content: string }>>([]);
-  const [mounted, setMounted] = useState(false);
+  // Supabaseデータ管理フックを使用
+  const {
+    sources,
+    styles,
+    scenarios,
+    chatMessages,
+    mounted,
+    loading: dataLoading,
+    createSource,
+    updateSource,
+    deleteSource,
+    createStyle,
+    updateStyle,
+    deleteStyle,
+    createScenario,
+    updateScenario,
+    deleteScenario,
+    addChatMessage,
+    clearChatMessages,
+    setSources,
+    setStyles,
+    setScenarios,
+    setChatMessages,
+  } = useSupabaseData();
+
   const [inputValue, setInputValue] = useState("");
   const [editingSource, setEditingSource] = useState<Source | null>(null);
   const [activeTab, setActiveTab] = useState<"style" | "sources">("sources");
@@ -31,23 +57,6 @@ export default function NotebookLMPage() {
   const [showFileUpload, setShowFileUpload] = useState(false);
   const [loading, setLoading] = useState(false);
   const [tempName, setTempName] = useState("");
-
-  // クライアントサイドでのみローカルストレージから読み込み
-  useEffect(() => {
-    setMounted(true);
-    const data = loadFromLocalStorage();
-    if (data.sources.length > 0) setSources(data.sources);
-    if (data.styles.length > 0) setStyles(data.styles);
-    if (data.scenarios.length > 0) setScenarios(data.scenarios);
-    if (data.chatMessages.length > 0) setChatMessages(data.chatMessages);
-  }, []);
-
-  // ローカルストレージへの自動保存（マウント後のみ）
-  useEffect(() => {
-    if (mounted) {
-      saveToLocalStorage(sources, styles, scenarios, chatMessages);
-    }
-  }, [sources, styles, scenarios, chatMessages, mounted]);
 
   // editingSourceが変更されたらtempNameをリセット
   useEffect(() => {
@@ -116,7 +125,21 @@ export default function NotebookLMPage() {
   };
 
   // ソースのコンテンツを更新
-  const updateSourceContent = (id: string, content: string) => {
+  const updateSourceContent = async (id: string, content: string) => {
+    // まず該当するアイテムを見つける
+    const source = sources.find(s => s.id === id);
+    const style = styles.find(s => s.id === id);
+    const scenario = scenarios.find(s => s.id === id);
+
+    // データベースを更新
+    if (source) {
+      await updateSource(id, { content });
+    } else if (style) {
+      await updateStyle(id, { content });
+    } else if (scenario) {
+      await updateScenario(id, { content });
+    }
+
     setSources(sources.map(s => s.id === id ? { ...s, content } : s));
     setStyles(styles.map(s => s.id === id ? { ...s, content } : s));
     setScenarios(scenarios.map(s => s.id === id ? { ...s, content } : s));
@@ -126,7 +149,21 @@ export default function NotebookLMPage() {
   };
 
   // ソースの名前を更新
-  const updateSourceName = (id: string, title: string) => {
+  const updateSourceName = async (id: string, title: string) => {
+    // まず該当するアイテムを見つける
+    const source = sources.find(s => s.id === id);
+    const style = styles.find(s => s.id === id);
+    const scenario = scenarios.find(s => s.id === id);
+
+    // データベースを更新
+    if (source) {
+      await updateSource(id, { title });
+    } else if (style) {
+      await updateStyle(id, { title });
+    } else if (scenario) {
+      await updateScenario(id, { title });
+    }
+
     setSources(sources.map(s => s.id === id ? { ...s, title } : s));
     setStyles(styles.map(s => s.id === id ? { ...s, title } : s));
     setScenarios(scenarios.map(s => s.id === id ? { ...s, title } : s));
@@ -196,6 +233,14 @@ export default function NotebookLMPage() {
         content: data.content || `# YouTube動画のAI分析\n\n動画URL: ${url}\n\n要約:\n\nポイント:\n`,
         loading: false,
       };
+
+      // データベースに保存
+      const { loading: _, ...itemToSave } = updatedItem;
+      if (activeTab === "style") {
+        await createStyle(itemToSave);
+      } else {
+        await createSource(itemToSave);
+      }
 
       if (activeTab === "style") {
         setStyles(prev => prev.map(s => s.id === newItemId ? updatedItem : s));
@@ -274,6 +319,14 @@ export default function NotebookLMPage() {
           loading: false,
         };
 
+        // データベースに保存
+        const { loading: _, ...itemToSave } = updatedItem;
+        if (activeTab === "style") {
+          await createStyle(itemToSave);
+        } else {
+          await createSource(itemToSave);
+        }
+
         if (activeTab === "style") {
           setStyles(prev => prev.map(s => s.id === newItemId ? updatedItem : s));
         } else {
@@ -308,6 +361,14 @@ export default function NotebookLMPage() {
             loading: false,
           };
 
+          // データベースに保存
+          const { loading: _, ...itemToSave } = updatedItem;
+          if (activeTab === "style") {
+            await createStyle(itemToSave);
+          } else {
+            await createSource(itemToSave);
+          }
+
           if (activeTab === "style") {
             setStyles(prev => prev.map(s => s.id === newItemId ? updatedItem : s));
           } else {
@@ -336,7 +397,7 @@ export default function NotebookLMPage() {
   };
 
   // 新規ファイル作成の処理
-  const handleNewFile = (content: string) => {
+  const handleNewFile = async (content: string) => {
     const timestamp = generateTimestamp();
     const newItem: Source = {
       id: uid(),
@@ -347,9 +408,12 @@ export default function NotebookLMPage() {
       createdAt: timestamp,
     };
 
+    // データベースに保存
     if (activeTab === "style") {
+      await createStyle(newItem);
       setStyles([...styles, newItem]);
     } else {
+      await createSource(newItem);
       setSources([...sources, newItem]);
     }
     setEditingSource(newItem);
@@ -385,24 +449,24 @@ export default function NotebookLMPage() {
   };
 
   // スタイルを削除
-  const deleteStyle = (styleId: string) => {
-    setStyles(styles.filter(s => s.id !== styleId));
+  const handleDeleteStyle = async (styleId: string) => {
+    await deleteStyle(styleId);
     if (editingSource?.id === styleId) {
       setEditingSource(null);
     }
   };
 
   // ソースを削除
-  const deleteSource = (sourceId: string) => {
-    setSources(sources.filter(s => s.id !== sourceId));
+  const handleDeleteSource = async (sourceId: string) => {
+    await deleteSource(sourceId);
     if (editingSource?.id === sourceId) {
       setEditingSource(null);
     }
   };
 
   // シナリオを削除
-  const deleteScenario = (scenarioId: string) => {
-    setScenarios(scenarios.filter(s => s.id !== scenarioId));
+  const handleDeleteScenario = async (scenarioId: string) => {
+    await deleteScenario(scenarioId);
     if (editingSource?.id === scenarioId) {
       setEditingSource(null);
     }
@@ -412,21 +476,35 @@ export default function NotebookLMPage() {
   const handleSendMessage = async () => {
     if (!inputValue.trim()) return;
 
-    const userMessage = { role: 'user', content: inputValue };
+    const userMessage = {
+      id: uid(),
+      role: 'user' as const,
+      content: inputValue,
+      timestamp: new Date().toISOString(),
+    };
     const newMessages = [...chatMessages, userMessage];
     setChatMessages(newMessages);
     setInputValue('');
     setLoading(true);
 
+    // ユーザーメッセージをデータベースに保存
+    await addChatMessage(userMessage);
+
     // アシスタントの空メッセージを追加
-    setChatMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+    const assistantMessage: ChatMessage = {
+      id: uid(),
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+    };
+    setChatMessages(prev => [...prev, assistantMessage]);
 
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: newMessages,
+          messages: newMessages.map(m => ({ role: m.role, content: m.content })),
           sources: [...styles, ...sources],
         }),
       });
@@ -435,7 +513,7 @@ export default function NotebookLMPage() {
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-      let assistantMessage = '';
+      let assistantContent = '';
 
       if (reader) {
         while (true) {
@@ -453,10 +531,10 @@ export default function NotebookLMPage() {
               try {
                 const parsed = JSON.parse(data);
                 if (parsed.content) {
-                  assistantMessage += parsed.content;
+                  assistantContent += parsed.content;
                   setChatMessages(prev => {
                     const updated = [...prev];
-                    updated[updated.length - 1] = { role: 'assistant', content: assistantMessage };
+                    updated[updated.length - 1] = { ...updated[updated.length - 1], content: assistantContent };
                     return updated;
                   });
                 }
@@ -467,6 +545,12 @@ export default function NotebookLMPage() {
           }
         }
       }
+
+      // アシスタントメッセージをデータベースに保存
+      await addChatMessage({
+        ...assistantMessage,
+        content: assistantContent,
+      });
     } catch (error) {
       console.error('Chat error:', error);
       // エラー時はメッセージを削除
@@ -502,6 +586,8 @@ export default function NotebookLMPage() {
         createdAt: timestamp,
       };
 
+      // データベースに保存
+      await createScenario(newScenario);
       setScenarios([...scenarios, newScenario]);
       setEditingSource(newScenario);
     } catch (error) {
@@ -635,7 +721,7 @@ export default function NotebookLMPage() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              deleteStyle(style.id);
+                              handleDeleteStyle(style.id);
                             }}
                             className="opacity-0 group-hover:opacity-100 p-2 rounded-lg text-text-tertiary hover:text-red-500 hover:bg-red-50 transition-all duration-200"
                             aria-label="削除"
@@ -708,7 +794,7 @@ export default function NotebookLMPage() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              deleteSource(source.id);
+                              handleDeleteSource(source.id);
                             }}
                             className="opacity-0 group-hover:opacity-100 p-2 rounded-lg text-text-tertiary hover:text-red-500 hover:bg-red-50 transition-all duration-200"
                             aria-label="削除"
@@ -804,9 +890,9 @@ export default function NotebookLMPage() {
                   <button
                     onClick={() => {
                       if (editingSource.type.includes('Scenario')) {
-                        deleteScenario(editingSource.id);
+                        handleDeleteScenario(editingSource.id);
                       } else {
-                        deleteSource(editingSource.id);
+                        handleDeleteSource(editingSource.id);
                       }
                     }}
                     className="rounded-xl p-2 text-text-secondary hover:bg-red-100 hover:text-red-600 transition-all duration-200"
@@ -1046,7 +1132,7 @@ export default function NotebookLMPage() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          deleteScenario(scenario.id);
+                          handleDeleteScenario(scenario.id);
                         }}
                         className="opacity-0 group-hover:opacity-100 p-2 rounded-lg text-text-tertiary hover:text-red-500 hover:bg-red-50 transition-all duration-200"
                         aria-label="削除"
