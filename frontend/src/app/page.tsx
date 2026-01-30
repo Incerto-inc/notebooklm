@@ -6,6 +6,7 @@ import { VideoUploadDialog } from "@/components/VideoUploadDialog";
 import { FileUploadZone } from "@/components/FileUploadZone";
 import { useSupabaseData } from "@/hooks/useSupabaseData";
 import { useMultiJobPolling } from "@/hooks/useJobPolling";
+import { useJobRestore } from "@/hooks/useJobRestore";
 
 interface Source {
   id: string;
@@ -64,6 +65,9 @@ export default function NotebookLMPage() {
     setTempName("");
   }, [editingSource]);
 
+  // 🔴 ジョブ復元フック
+  const { isRestoring, restoreResult } = useJobRestore();
+
   // ジョブのポーリング処理
   const { addJob } = useMultiJobPolling({
     onJobComplete: async (jobId, jobInfo, result) => {
@@ -74,17 +78,17 @@ export default function NotebookLMPage() {
         loading: false,
       };
 
-      const { loading: _, ...itemToSave } = updatedItem;
+      // 🔴 DBを更新（loading: falseで保存）
       if (targetTab === 'style') {
-        await createStyle(itemToSave);
+        await updateStyle(itemId, { loading: false, content: updatedItem.content });
         setStyles(prev => prev.map(s => s.id === itemId ? updatedItem : s));
       } else if (targetTab === 'scenario') {
-        await createScenario(itemToSave);
+        await updateScenario(itemId, { loading: false, content: updatedItem.content });
         setScenarios(prev => [...prev, updatedItem]);
         setEditingSource(updatedItem);
         setLoading(false);
       } else {
-        await createSource(itemToSave);
+        await updateSource(itemId, { loading: false, content: updatedItem.content });
         setSources(prev => prev.map(s => s.id === itemId ? updatedItem : s));
       }
 
@@ -92,7 +96,7 @@ export default function NotebookLMPage() {
         setEditingSource(updatedItem);
       }
     },
-    onJobError: (jobId, jobInfo, error) => {
+    onJobError: async (jobId, jobInfo, error) => {
       const { itemId, targetTab, loadingItem } = jobInfo;
       const errorItem: Source = {
         ...loadingItem,
@@ -100,11 +104,16 @@ export default function NotebookLMPage() {
         loading: false,
       };
 
+      // 🔴 DBを更新（loading: falseで保存）
       if (targetTab === 'style') {
+        await updateStyle(itemId, { loading: false, content: errorItem.content });
         setStyles(prev => prev.map(s => s.id === itemId ? errorItem : s));
       } else if (targetTab === 'scenario') {
-        // シナリオのエラーは何もしない（まだ追加されていないため）
+        await updateScenario(itemId, { loading: false, content: errorItem.content });
+        setScenarios(prev => [...prev, errorItem]);
+        setLoading(false);
       } else {
+        await updateSource(itemId, { loading: false, content: errorItem.content });
         setSources(prev => prev.map(s => s.id === itemId ? errorItem : s));
       }
 
@@ -112,7 +121,55 @@ export default function NotebookLMPage() {
         setEditingSource(errorItem);
       }
     },
+    onPendingJobsFound: (jobs) => {
+      // 進行中のジョブが見つかった場合の通知
+      const jobTypes = jobs.map(j => {
+        switch (j.type) {
+          case 'ANALYZE_VIDEO': return '動画分析';
+          case 'ANALYZE_FILE': return 'ファイル分析';
+          case 'GENERATE_SCENARIO': return 'シナリオ生成';
+          default: return j.type;
+        }
+      });
+
+      const message = `ページリロード前に進行中だった処理があります:\n\n${jobTypes.join('\n')}\n\nこれらの処理はバックグラウンドで継続されています。\n完了するとデータベースに保存されます。`;
+
+      // 少し遅延させて通知を表示（ページロード完了後）
+      setTimeout(() => {
+        alert(message);
+      }, 1000);
+    },
   });
+
+  // 🔴 復元されたローディングアイテムを既存データにマージ
+  useEffect(() => {
+    if (isRestoring) return;
+
+    const { loadingItems, activeJobs } = restoreResult;
+
+    // ローディングアイテムを追加
+    if (loadingItems.length > 0) {
+      // 重複を避けつつ追加
+      const existingIds = new Set([...styles, ...sources, ...scenarios].map(s => s.id));
+
+      for (const item of loadingItems) {
+        if (!existingIds.has(item.id)) {
+          if (item.type?.includes('Style')) {
+            setStyles(prev => [...prev, item]);
+          } else if (item.type?.includes('Source') || item.type === 'Markdown') {
+            setSources(prev => [...prev, item]);
+          } else if (item.type === 'Scenario') {
+            setScenarios(prev => [...prev, item]);
+          }
+        }
+      }
+    }
+
+    // ポーリングを再開
+    for (const [jobId, jobInfo] of activeJobs.entries()) {
+      addJob(jobId, jobInfo);
+    }
+  }, [isRestoring, restoreResult, addJob, styles, sources, scenarios]);
 
   const suggestedPrompts = sources.length > 0 ? [
     "このドキュメントの主なポイントを要約してください",
@@ -260,13 +317,16 @@ export default function NotebookLMPage() {
       loading: true,
     };
 
-    // ソースを追加（ローディング状態）
+    // 🔴 まずDBに保存（loading: trueの状態）
+    const savedItem = await (activeTab === "style" ? createStyle(loadingItem) : createSource(loadingItem));
+
+    // UIに追加
     if (activeTab === "style") {
-      setStyles([...styles, loadingItem]);
+      setStyles([...styles, savedItem]);
     } else {
-      setSources([...sources, loadingItem]);
+      setSources([...sources, savedItem]);
     }
-    setEditingSource(loadingItem);
+    setEditingSource(savedItem);
 
     // ジョブ作成リクエスト
     try {
@@ -275,24 +335,33 @@ export default function NotebookLMPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'ANALYZE_VIDEO',
-          input: { url, mode: activeTab },
+          input: {
+            url,
+            mode: activeTab,
+            _metadata: { itemId: newItemId, targetTab: activeTab },
+          },
         }),
       });
 
       const { jobId } = await response.json();
 
       // ジョブ情報を保存（useMultiJobPollingに追加）
-      addJob(jobId, { itemId: newItemId, targetTab: activeTab, loadingItem });
+      addJob(jobId, { itemId: newItemId, targetTab: activeTab, loadingItem: savedItem });
     } catch (error: any) {
       console.error('Job creation error:', error);
       const errorItem: Source = {
-        ...loadingItem,
+        ...savedItem,
         content: `# エラー\n\n${error.message}`,
         loading: false,
       };
-      const targetArray = activeTab === "style" ? styles : sources;
-      const setTargetArray = activeTab === "style" ? setStyles : setSources;
-      setTargetArray(prev => prev.map(s => s.id === newItemId ? errorItem : s));
+      // DBを更新してエラー状態を保存
+      if (activeTab === "style") {
+        await updateStyle(newItemId, { loading: false, content: errorItem.content });
+        setStyles(prev => prev.map(s => s.id === newItemId ? errorItem : s));
+      } else {
+        await updateSource(newItemId, { loading: false, content: errorItem.content });
+        setSources(prev => prev.map(s => s.id === newItemId ? errorItem : s));
+      }
       setEditingSource(errorItem);
     }
   };
@@ -314,13 +383,16 @@ export default function NotebookLMPage() {
       loading: true,
     };
 
-    // ソースを追加（ローディング状態）
+    // 🔴 まずDBに保存（loading: trueの状態）
+    const savedItem = await (activeTab === "style" ? createStyle(loadingItem) : createSource(loadingItem));
+
+    // UIに追加
     if (activeTab === "style") {
-      setStyles([...styles, loadingItem]);
+      setStyles([...styles, savedItem]);
     } else {
-      setSources([...sources, loadingItem]);
+      setSources([...sources, savedItem]);
     }
-    setEditingSource(loadingItem);
+    setEditingSource(savedItem);
     setShowFileUpload(false);
 
     // ジョブ作成リクエスト
@@ -334,6 +406,7 @@ export default function NotebookLMPage() {
             filename: file.name,
             fileType: fileType,
             mode: activeTab,
+            _metadata: { itemId: newItemId, targetTab: activeTab },
           };
 
           if (fileType === 'application/pdf') {
@@ -356,17 +429,22 @@ export default function NotebookLMPage() {
           const { jobId } = await response.json();
 
           // ジョブ情報を保存（useMultiJobPollingに追加）
-          addJob(jobId, { itemId: newItemId, targetTab: activeTab, loadingItem });
+          addJob(jobId, { itemId: newItemId, targetTab: activeTab, loadingItem: savedItem });
         } catch (error: any) {
           console.error('Job creation error:', error);
           const errorItem: Source = {
-            ...loadingItem,
+            ...savedItem,
             content: `# エラー\n\n${error.message}`,
             loading: false,
           };
-          const targetArray = activeTab === "style" ? styles : sources;
-          const setTargetArray = activeTab === "style" ? setStyles : setSources;
-          setTargetArray(prev => prev.map(s => s.id === newItemId ? errorItem : s));
+          // DBを更新してエラー状態を保存
+          if (activeTab === "style") {
+            await updateStyle(newItemId, { loading: false, content: errorItem.content });
+            setStyles(prev => prev.map(s => s.id === newItemId ? errorItem : s));
+          } else {
+            await updateSource(newItemId, { loading: false, content: errorItem.content });
+            setSources(prev => prev.map(s => s.id === newItemId ? errorItem : s));
+          }
           setEditingSource(errorItem);
         }
       };
@@ -381,13 +459,18 @@ export default function NotebookLMPage() {
     } catch (error: any) {
       console.error('File analysis error:', error);
       const errorItem: Source = {
-        ...loadingItem,
+        ...savedItem,
         content: `# エラー\n\n${error.message}`,
         loading: false,
       };
-      const targetArray = activeTab === "style" ? styles : sources;
-      const setTargetArray = activeTab === "style" ? setStyles : setSources;
-      setTargetArray(prev => prev.map(s => s.id === newItemId ? errorItem : s));
+      // DBを更新してエラー状態を保存
+      if (activeTab === "style") {
+        await updateStyle(newItemId, { loading: false, content: errorItem.content });
+        setStyles(prev => prev.map(s => s.id === newItemId ? errorItem : s));
+      } else {
+        await updateSource(newItemId, { loading: false, content: errorItem.content });
+        setSources(prev => prev.map(s => s.id === newItemId ? errorItem : s));
+      }
       setEditingSource(errorItem);
     }
   };
@@ -572,6 +655,9 @@ export default function NotebookLMPage() {
       loading: true,
     };
 
+    // 🔴 まずDBに保存（loading: trueの状態）
+    const savedItem = await createScenario(loadingItem);
+
     setLoading(true);
 
     // ジョブ作成リクエスト
@@ -585,6 +671,7 @@ export default function NotebookLMPage() {
             styles,
             sources,
             chatHistory: chatMessages,
+            _metadata: { itemId: newItemId, targetTab: 'scenario' },
           },
         }),
       });
@@ -592,9 +679,11 @@ export default function NotebookLMPage() {
       const { jobId } = await response.json();
 
       // ジョブ情報を保存（useMultiJobPollingに追加）
-      addJob(jobId, { itemId: newItemId, targetTab: 'scenario', loadingItem });
+      addJob(jobId, { itemId: newItemId, targetTab: 'scenario', loadingItem: savedItem });
     } catch (error: any) {
       console.error('Scenario generation error:', error);
+      // DBを更新してエラー状態を保存
+      await updateScenario(newItemId, { loading: false, content: `# エラー\n\n${error.message}` });
       setLoading(false);
     }
   };
