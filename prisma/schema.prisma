@@ -20,6 +20,7 @@ model Style {
   content   String   @db.Text
   createdAt String   @default("")
   videoUrl  String?  @map("video_url")
+  loading   Boolean  @default(false)
   updatedAt DateTime @updatedAt
   createdAtDateTime DateTime @default(now()) @map("created_at")
 
@@ -35,6 +36,7 @@ model Source {
   content   String   @db.Text
   createdAt String   @default("")
   videoUrl  String?  @map("video_url")
+  loading   Boolean  @default(false)
   updatedAt DateTime @updatedAt
   createdAtDateTime DateTime @default(now()) @map("created_at")
 
@@ -49,6 +51,7 @@ model Scenario {
   selected  Boolean  @default(false)
   content   String   @db.Text
   createdAt String   @default("")
+  loading   Boolean  @default(false)
   updatedAt DateTime @updatedAt
   createdAtDateTime DateTime @default(now()) @map("created_at")
 

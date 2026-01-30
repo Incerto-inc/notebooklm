@@ -28,7 +28,9 @@ interface JobInfo {
 interface UseMultiJobPollingOptions {
   onJobComplete?: (jobId: string, jobInfo: JobInfo, result: any) => void;
   onJobError?: (jobId: string, jobInfo: JobInfo, error: string) => void;
+  onPendingJobsFound?: (jobs: Array<{ id: string; type: string; input: any }>) => void;
   interval?: number;
+  restoreOnMount?: boolean; // ページロード時に進行中のジョブを検出
 }
 
 // 単一ジョブのポーリング（既存機能）
@@ -93,9 +95,10 @@ export function useJobPolling(interval: number = 2000): UseJobPollingResult {
 
 // 複数ジョブのポーリング（新機能）
 export function useMultiJobPolling(options: UseMultiJobPollingOptions = {}) {
-  const { onJobComplete, onJobError, interval = 2000 } = options;
+  const { onJobComplete, onJobError, onPendingJobsFound, interval = 2000, restoreOnMount = true } = options;
   const [activeJobs, setActiveJobs] = useState<Map<string, JobInfo>>(new Map());
   const isInitializedRef = useRef(false);
+  const hasRestoredRef = useRef(false);
 
   const addJob = useCallback((jobId: string, jobInfo: JobInfo) => {
     setActiveJobs(prev => new Map(prev).set(jobId, jobInfo));
@@ -108,6 +111,31 @@ export function useMultiJobPolling(options: UseMultiJobPollingOptions = {}) {
       return updated;
     });
   }, []);
+
+  // ページロード時に進行中のジョブを検出
+  useEffect(() => {
+    if (!restoreOnMount || hasRestoredRef.current) return;
+
+    const restorePendingJobs = async () => {
+      try {
+        const response = await fetch('/api/jobs?status=PROCESSING');
+        if (!response.ok) return;
+
+        const pendingJobs = await response.json();
+
+        if (pendingJobs.length > 0) {
+          console.log(`Found ${pendingJobs.length} pending jobs after page reload`);
+          onPendingJobsFound?.(pendingJobs);
+        }
+      } catch (error) {
+        console.error('Failed to restore pending jobs:', error);
+      } finally {
+        hasRestoredRef.current = true;
+      }
+    };
+
+    restorePendingJobs();
+  }, [restoreOnMount, onPendingJobsFound]);
 
   // ジョブのポーリング処理
   useEffect(() => {
