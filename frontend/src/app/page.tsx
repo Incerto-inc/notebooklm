@@ -5,7 +5,7 @@ import { uid } from "uid";
 import { VideoUploadDialog } from "@/components/VideoUploadDialog";
 import { FileUploadZone } from "@/components/FileUploadZone";
 import { useSupabaseData } from "@/hooks/useSupabaseData";
-import { useJobPolling } from "@/hooks/useJobPolling";
+import { useMultiJobPolling } from "@/hooks/useJobPolling";
 
 interface Source {
   id: string;
@@ -58,7 +58,6 @@ export default function NotebookLMPage() {
   const [showFileUpload, setShowFileUpload] = useState(false);
   const [loading, setLoading] = useState(false);
   const [tempName, setTempName] = useState("");
-  const [activeJobs, setActiveJobs] = useState<Map<string, { itemId: string; targetTab: 'style' | 'sources' | 'scenario'; loadingItem: Source }>>(new Map());
 
   // editingSourceが変更されたらtempNameをリセット
   useEffect(() => {
@@ -66,94 +65,54 @@ export default function NotebookLMPage() {
   }, [editingSource]);
 
   // ジョブのポーリング処理
-  useEffect(() => {
-    const intervalId = setInterval(async () => {
-      const jobEntries = Array.from(activeJobs.entries());
-      if (jobEntries.length === 0) return;
+  const { addJob } = useMultiJobPolling({
+    onJobComplete: async (jobId, jobInfo, result) => {
+      const { itemId, targetTab, loadingItem } = jobInfo;
+      const updatedItem: Source = {
+        ...loadingItem,
+        content: (targetTab === 'scenario' ? result.scenario : result.content) || loadingItem.content,
+        loading: false,
+      };
 
-      const jobsToRemove: string[] = [];
-      const jobsToUpdate: Map<string, Source> = new Map();
-
-      for (const [jobId, jobInfo] of jobEntries) {
-        try {
-          const response = await fetch(`/api/jobs/${jobId}`);
-          if (!response.ok) {
-            jobsToRemove.push(jobId);
-            continue;
-          }
-
-          const job = await response.json();
-
-          if (job.status === 'COMPLETED') {
-            const { itemId, targetTab, loadingItem } = jobInfo;
-            const updatedItem: Source = {
-              ...loadingItem,
-              content: (targetTab === 'scenario' ? job.result.scenario : job.result.content) || loadingItem.content,
-              loading: false,
-            };
-
-            // データベースに保存
-            const { loading: _, ...itemToSave } = updatedItem;
-            if (targetTab === 'style') {
-              await createStyle(itemToSave);
-              setStyles(prev => prev.map(s => s.id === itemId ? updatedItem : s));
-            } else if (targetTab === 'scenario') {
-              await createScenario(itemToSave);
-              setScenarios(prev => [...prev, updatedItem]);
-              setEditingSource(updatedItem);
-              setLoading(false);
-            } else {
-              await createSource(itemToSave);
-              setSources(prev => prev.map(s => s.id === itemId ? updatedItem : s));
-            }
-
-            if (editingSource?.id === itemId) {
-              setEditingSource(updatedItem);
-            }
-
-            jobsToRemove.push(jobId);
-          } else if (job.status === 'FAILED') {
-            const { itemId, targetTab, loadingItem } = jobInfo;
-            const errorItem: Source = {
-              ...loadingItem,
-              content: `# エラー\n\n${job.error || '不明なエラーが発生しました'}`,
-              loading: false,
-            };
-
-            if (targetTab === 'style') {
-              setStyles(prev => prev.map(s => s.id === itemId ? errorItem : s));
-            } else if (targetTab === 'scenario') {
-              // シナリオのエラーは何もしない（まだ追加されていないため）
-            } else {
-              setSources(prev => prev.map(s => s.id === itemId ? errorItem : s));
-            }
-
-            if (editingSource?.id === itemId) {
-              setEditingSource(errorItem);
-            }
-
-            jobsToRemove.push(jobId);
-          }
-        } catch (error) {
-          console.error(`Polling error for job ${jobId}:`, error);
-          jobsToRemove.push(jobId);
-        }
+      const { loading: _, ...itemToSave } = updatedItem;
+      if (targetTab === 'style') {
+        await createStyle(itemToSave);
+        setStyles(prev => prev.map(s => s.id === itemId ? updatedItem : s));
+      } else if (targetTab === 'scenario') {
+        await createScenario(itemToSave);
+        setScenarios(prev => [...prev, updatedItem]);
+        setEditingSource(updatedItem);
+        setLoading(false);
+      } else {
+        await createSource(itemToSave);
+        setSources(prev => prev.map(s => s.id === itemId ? updatedItem : s));
       }
 
-      // 完了したジョブを削除
-      if (jobsToRemove.length > 0) {
-        setActiveJobs(prev => {
-          const updated = new Map(prev);
-          for (const jobId of jobsToRemove) {
-            updated.delete(jobId);
-          }
-          return updated;
-        });
+      if (editingSource?.id === itemId) {
+        setEditingSource(updatedItem);
       }
-    }, 2000); // 2秒間隔でポーリング
+    },
+    onJobError: (jobId, jobInfo, error) => {
+      const { itemId, targetTab, loadingItem } = jobInfo;
+      const errorItem: Source = {
+        ...loadingItem,
+        content: `# エラー\n\n${error}`,
+        loading: false,
+      };
 
-    return () => clearInterval(intervalId);
-  }, [activeJobs, styles, sources, scenarios, editingSource, createStyle, createSource, createScenario, setScenarios]);
+      if (targetTab === 'style') {
+        setStyles(prev => prev.map(s => s.id === itemId ? errorItem : s));
+      } else if (targetTab === 'scenario') {
+        // シナリオのエラーは何もしない（まだ追加されていないため）
+      } else {
+        setSources(prev => prev.map(s => s.id === itemId ? errorItem : s));
+      }
+
+      if (editingSource?.id === itemId) {
+        setEditingSource(errorItem);
+      }
+    },
+  });
 
   const suggestedPrompts = sources.length > 0 ? [
     "このドキュメントの主なポイントを要約してください",
@@ -322,8 +281,8 @@ export default function NotebookLMPage() {
 
       const { jobId } = await response.json();
 
-      // ジョブ情報を保存
-      setActiveJobs(prev => new Map(prev).set(jobId, { itemId: newItemId, targetTab: activeTab, loadingItem }));
+      // ジョブ情報を保存（useMultiJobPollingに追加）
+      addJob(jobId, { itemId: newItemId, targetTab: activeTab, loadingItem });
     } catch (error: any) {
       console.error('Job creation error:', error);
       const errorItem: Source = {
@@ -396,8 +355,8 @@ export default function NotebookLMPage() {
 
           const { jobId } = await response.json();
 
-          // ジョブ情報を保存
-          setActiveJobs(prev => new Map(prev).set(jobId, { itemId: newItemId, targetTab: activeTab, loadingItem }));
+          // ジョブ情報を保存（useMultiJobPollingに追加）
+          addJob(jobId, { itemId: newItemId, targetTab: activeTab, loadingItem });
         } catch (error: any) {
           console.error('Job creation error:', error);
           const errorItem: Source = {
@@ -632,8 +591,8 @@ export default function NotebookLMPage() {
 
       const { jobId } = await response.json();
 
-      // ジョブ情報を保存
-      setActiveJobs(prev => new Map(prev).set(jobId, { itemId: newItemId, targetTab: 'scenario', loadingItem }));
+      // ジョブ情報を保存（useMultiJobPollingに追加）
+      addJob(jobId, { itemId: newItemId, targetTab: 'scenario', loadingItem });
     } catch (error: any) {
       console.error('Scenario generation error:', error);
       setLoading(false);
