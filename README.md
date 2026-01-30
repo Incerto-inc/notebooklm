@@ -51,6 +51,24 @@
 - **フロントエンド**: Next.js 16.1.3, React 19.2.3
 - **スタイリング**: Tailwind CSS 4
 - **言語**: TypeScript
+- **バックエンド**: Next.js API Routes
+- **データベース**: Supabase (PostgreSQL)
+- **ORM**: Prisma
+
+## CI/CD
+
+### GitHub Actions
+
+このプロジェクトではGitHub Actionsを使用して、mainブランチへのマージ時に自動的にデータベーススキーマを更新します。
+
+**ワークフロー**:
+- `.github/workflows/prisma-migrate-production.yml`: mainブランチへのマージ時にPrismaマイグレーションを本番DBに適用
+
+**詳細な設定方法**: [docs/github-actions-setup.md](docs/github-actions-setup.md)
+
+**必要な設定**:
+1. GitHub Secretsに `DATABASE_URL`（本番DB接続文字列）を設定
+2. PRをマージすると自動的にマイグレーションが適用されます
 
 ## 開発
 
