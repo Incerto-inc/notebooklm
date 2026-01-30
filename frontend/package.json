@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "cd .. && npx prisma generate && mkdir -p frontend/node_modules/@prisma && cp -r node_modules/@prisma/client frontend/node_modules/@prisma/"
+    "postinstall": "cd .. && npx prisma generate"
   },
   "dependencies": {
     "@openrouter/sdk": "^0.4.0",
