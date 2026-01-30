@@ -64,3 +64,39 @@ model ChatMessage {
 
   @@map("chat_messages")
 }
+
+// ジョブ管理 - AI処理の非同期実行
+model Job {
+  id                String   @id @default(uuid())
+  type              JobType
+  status            JobStatus @default(PENDING)
+  input             Json     // 処理入力パラメータ
+  result            Json?    // 処理結果
+  error             String?  // エラーメッセージ
+  retryCount        Int      @default(0)
+  maxRetries        Int      @default(3)
+  priority          Int      @default(0) // 高い数値ほど高優先度
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([status])
+  @@index([type, status])
+  @@index([createdAt])
+  @@map("jobs")
+}
+
+enum JobType {
+  ANALYZE_VIDEO
+  ANALYZE_FILE
+  GENERATE_SCENARIO
+}
+
+enum JobStatus {
+  PENDING      // 処理待ち
+  PROCESSING   // 処理中
+  COMPLETED    // 完了
+  FAILED       // 失敗（リトライ可能）
+  CANCELLED    // キャンセル済み
+}
