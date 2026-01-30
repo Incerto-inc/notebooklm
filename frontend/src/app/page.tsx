@@ -5,6 +5,7 @@ import { uid } from "uid";
 import { VideoUploadDialog } from "@/components/VideoUploadDialog";
 import { FileUploadZone } from "@/components/FileUploadZone";
 import { useSupabaseData } from "@/hooks/useSupabaseData";
+import { useJobPolling } from "@/hooks/useJobPolling";
 
 interface Source {
   id: string;
@@ -57,11 +58,102 @@ export default function NotebookLMPage() {
   const [showFileUpload, setShowFileUpload] = useState(false);
   const [loading, setLoading] = useState(false);
   const [tempName, setTempName] = useState("");
+  const [activeJobs, setActiveJobs] = useState<Map<string, { itemId: string; targetTab: 'style' | 'sources' | 'scenario'; loadingItem: Source }>>(new Map());
 
   // editingSourceが変更されたらtempNameをリセット
   useEffect(() => {
     setTempName("");
   }, [editingSource]);
+
+  // ジョブのポーリング処理
+  useEffect(() => {
+    const intervalId = setInterval(async () => {
+      const jobEntries = Array.from(activeJobs.entries());
+      if (jobEntries.length === 0) return;
+
+      const jobsToRemove: string[] = [];
+      const jobsToUpdate: Map<string, Source> = new Map();
+
+      for (const [jobId, jobInfo] of jobEntries) {
+        try {
+          const response = await fetch(`/api/jobs/${jobId}`);
+          if (!response.ok) {
+            jobsToRemove.push(jobId);
+            continue;
+          }
+
+          const job = await response.json();
+
+          if (job.status === 'COMPLETED') {
+            const { itemId, targetTab, loadingItem } = jobInfo;
+            const updatedItem: Source = {
+              ...loadingItem,
+              content: (targetTab === 'scenario' ? job.result.scenario : job.result.content) || loadingItem.content,
+              loading: false,
+            };
+
+            // データベースに保存
+            const { loading: _, ...itemToSave } = updatedItem;
+            if (targetTab === 'style') {
+              await createStyle(itemToSave);
+              setStyles(prev => prev.map(s => s.id === itemId ? updatedItem : s));
+            } else if (targetTab === 'scenario') {
+              await createScenario(itemToSave);
+              setScenarios(prev => [...prev, updatedItem]);
+              setEditingSource(updatedItem);
+              setLoading(false);
+            } else {
+              await createSource(itemToSave);
+              setSources(prev => prev.map(s => s.id === itemId ? updatedItem : s));
+            }
+
+            if (editingSource?.id === itemId) {
+              setEditingSource(updatedItem);
+            }
+
+            jobsToRemove.push(jobId);
+          } else if (job.status === 'FAILED') {
+            const { itemId, targetTab, loadingItem } = jobInfo;
+            const errorItem: Source = {
+              ...loadingItem,
+              content: `# エラー\n\n${job.error || '不明なエラーが発生しました'}`,
+              loading: false,
+            };
+
+            if (targetTab === 'style') {
+              setStyles(prev => prev.map(s => s.id === itemId ? errorItem : s));
+            } else if (targetTab === 'scenario') {
+              // シナリオのエラーは何もしない（まだ追加されていないため）
+            } else {
+              setSources(prev => prev.map(s => s.id === itemId ? errorItem : s));
+            }
+
+            if (editingSource?.id === itemId) {
+              setEditingSource(errorItem);
+            }
+
+            jobsToRemove.push(jobId);
+          }
+        } catch (error) {
+          console.error(`Polling error for job ${jobId}:`, error);
+          jobsToRemove.push(jobId);
+        }
+      }
+
+      // 完了したジョブを削除
+      if (jobsToRemove.length > 0) {
+        setActiveJobs(prev => {
+          const updated = new Map(prev);
+          for (const jobId of jobsToRemove) {
+            updated.delete(jobId);
+          }
+          return updated;
+        });
+      }
+    }, 2000); // 2秒間隔でポーリング
+
+    return () => clearInterval(intervalId);
+  }, [activeJobs, styles, sources, scenarios, editingSource, createStyle, createSource, createScenario, setScenarios]);
 
   const suggestedPrompts = sources.length > 0 ? [
     "このドキュメントの主なポイントを要約してください",
@@ -192,7 +284,7 @@ export default function NotebookLMPage() {
     URL.revokeObjectURL(url);
   };
 
-  // 動画URLを送信してAI分析
+  // 動画URLを送信してAI分析（非同期化）
   const handleVideoSubmit = async (url: string) => {
     const timestamp = generateTimestamp();
     const newItemId = uid();
@@ -217,56 +309,36 @@ export default function NotebookLMPage() {
     }
     setEditingSource(loadingItem);
 
-    // バックグラウンドでAPI呼び出し
+    // ジョブ作成リクエスト
     try {
-      const response = await fetch('/api/analyze-video', {
+      const response = await fetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, mode: activeTab }),
+        body: JSON.stringify({
+          type: 'ANALYZE_VIDEO',
+          input: { url, mode: activeTab },
+        }),
       });
 
-      const data = await response.json();
+      const { jobId } = await response.json();
 
-      // 完了したらソースの内容を更新
-      const updatedItem: Source = {
-        ...loadingItem,
-        content: data.content || `# YouTube動画のAI分析\n\n動画URL: ${url}\n\n要約:\n\nポイント:\n`,
-        loading: false,
-      };
-
-      // データベースに保存
-      const { loading: _, ...itemToSave } = updatedItem;
-      if (activeTab === "style") {
-        await createStyle(itemToSave);
-      } else {
-        await createSource(itemToSave);
-      }
-
-      if (activeTab === "style") {
-        setStyles(prev => prev.map(s => s.id === newItemId ? updatedItem : s));
-      } else {
-        setSources(prev => prev.map(s => s.id === newItemId ? updatedItem : s));
-      }
-      setEditingSource(updatedItem);
-    } catch (error) {
-      console.error('Video analysis error:', error);
-      // エラー時もローディング状態を解除
+      // ジョブ情報を保存
+      setActiveJobs(prev => new Map(prev).set(jobId, { itemId: newItemId, targetTab: activeTab, loadingItem }));
+    } catch (error: any) {
+      console.error('Job creation error:', error);
       const errorItem: Source = {
         ...loadingItem,
-        content: `# YouTube動画のAI分析\n\n動画URL: ${url}\n\nエラーが発生しました。\n\n${error}`,
+        content: `# エラー\n\n${error.message}`,
         loading: false,
       };
-
-      if (activeTab === "style") {
-        setStyles(prev => prev.map(s => s.id === newItemId ? errorItem : s));
-      } else {
-        setSources(prev => prev.map(s => s.id === newItemId ? errorItem : s));
-      }
+      const targetArray = activeTab === "style" ? styles : sources;
+      const setTargetArray = activeTab === "style" ? setStyles : setSources;
+      setTargetArray(prev => prev.map(s => s.id === newItemId ? errorItem : s));
       setEditingSource(errorItem);
     }
   };
 
-  // ファイルアップロード後の処理
+  // ファイルアップロード後の処理（非同期化）
   const handleFileSelect = async (file: File) => {
     const timestamp = generateTimestamp();
     const newItemId = uid();
@@ -292,47 +364,52 @@ export default function NotebookLMPage() {
     setEditingSource(loadingItem);
     setShowFileUpload(false);
 
-    // バックグラウンドでAPI呼び出し
+    // ジョブ作成リクエスト
     try {
-      // ファイルをbase64エンコード
+      // ファイルをbase64エンコードまたはテキストとして読み込み
       const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64Data = reader.result as string;
 
-        const response = await fetch('/api/analyze-file', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fileData: base64Data,
+      reader.onloadend = async () => {
+        try {
+          let inputData: any = {
             filename: file.name,
             fileType: fileType,
             mode: activeTab,
-          }),
-        });
+          };
 
-        const data = await response.json();
+          if (fileType === 'application/pdf') {
+            // PDFファイルはbase64エンコード
+            inputData.fileData = reader.result as string;
+          } else {
+            // テキストファイル
+            inputData.content = reader.result as string;
+          }
 
-        // 完了したらソースの内容を更新
-        const updatedItem: Source = {
-          ...loadingItem,
-          content: data.content || `# ファイルのAI分析\n\nファイル名: ${file.name}\n\n要約:\n\nポイント:\n`,
-          loading: false,
-        };
+          const response = await fetch('/api/jobs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'ANALYZE_FILE',
+              input: inputData,
+            }),
+          });
 
-        // データベースに保存
-        const { loading: _, ...itemToSave } = updatedItem;
-        if (activeTab === "style") {
-          await createStyle(itemToSave);
-        } else {
-          await createSource(itemToSave);
+          const { jobId } = await response.json();
+
+          // ジョブ情報を保存
+          setActiveJobs(prev => new Map(prev).set(jobId, { itemId: newItemId, targetTab: activeTab, loadingItem }));
+        } catch (error: any) {
+          console.error('Job creation error:', error);
+          const errorItem: Source = {
+            ...loadingItem,
+            content: `# エラー\n\n${error.message}`,
+            loading: false,
+          };
+          const targetArray = activeTab === "style" ? styles : sources;
+          const setTargetArray = activeTab === "style" ? setStyles : setSources;
+          setTargetArray(prev => prev.map(s => s.id === newItemId ? errorItem : s));
+          setEditingSource(errorItem);
         }
-
-        if (activeTab === "style") {
-          setStyles(prev => prev.map(s => s.id === newItemId ? updatedItem : s));
-        } else {
-          setSources(prev => prev.map(s => s.id === newItemId ? updatedItem : s));
-        }
-        setEditingSource(updatedItem);
       };
 
       if (fileType === 'application/pdf') {
@@ -340,58 +417,18 @@ export default function NotebookLMPage() {
         reader.readAsDataURL(file);
       } else {
         // テキストファイルはテキストとして読み込み
-        reader.onloadend = async () => {
-          const textContent = reader.result as string;
-
-          const response = await fetch('/api/analyze-file', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              content: textContent,
-              filename: file.name,
-              mode: activeTab,
-            }),
-          });
-
-          const data = await response.json();
-
-          const updatedItem: Source = {
-            ...loadingItem,
-            content: data.content || `# ファイルのAI分析\n\nファイル名: ${file.name}\n\n内容:\n\n${textContent}`,
-            loading: false,
-          };
-
-          // データベースに保存
-          const { loading: _, ...itemToSave } = updatedItem;
-          if (activeTab === "style") {
-            await createStyle(itemToSave);
-          } else {
-            await createSource(itemToSave);
-          }
-
-          if (activeTab === "style") {
-            setStyles(prev => prev.map(s => s.id === newItemId ? updatedItem : s));
-          } else {
-            setSources(prev => prev.map(s => s.id === newItemId ? updatedItem : s));
-          }
-          setEditingSource(updatedItem);
-        };
         reader.readAsText(file);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('File analysis error:', error);
-      // エラー時もローディング状態を解除
       const errorItem: Source = {
         ...loadingItem,
-        content: `# ファイルのAI分析\n\nファイル名: ${file.name}\n\nエラーが発生しました。\n\n${error}`,
+        content: `# エラー\n\n${error.message}`,
         loading: false,
       };
-
-      if (activeTab === "style") {
-        setStyles(prev => prev.map(s => s.id === newItemId ? errorItem : s));
-      } else {
-        setSources(prev => prev.map(s => s.id === newItemId ? errorItem : s));
-      }
+      const targetArray = activeTab === "style" ? styles : sources;
+      const setTargetArray = activeTab === "style" ? setStyles : setSources;
+      setTargetArray(prev => prev.map(s => s.id === newItemId ? errorItem : s));
       setEditingSource(errorItem);
     }
   };
@@ -560,39 +597,45 @@ export default function NotebookLMPage() {
     }
   };
 
-  // シナリオ生成
+  // シナリオ生成（非同期化）
   const handleGenerateScenario = async () => {
+    const timestamp = generateTimestamp();
+    const newItemId = uid();
+
+    // ローディング状態のダミーアイテム
+    const loadingItem: Source = {
+      id: newItemId,
+      title: generateInitialTitle(),
+      type: 'Scenario',
+      selected: true,
+      content: `# シナリオ生成中\n\nAIでシナリオを生成中...`,
+      createdAt: timestamp,
+      loading: true,
+    };
+
     setLoading(true);
+
+    // ジョブ作成リクエスト
     try {
-      const response = await fetch('/api/generate-scenario', {
+      const response = await fetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          styles,
-          sources,
-          chatHistory: chatMessages,
+          type: 'GENERATE_SCENARIO',
+          input: {
+            styles,
+            sources,
+            chatHistory: chatMessages,
+          },
         }),
       });
 
-      const data = await response.json();
+      const { jobId } = await response.json();
 
-      const timestamp = generateTimestamp();
-      const newScenario: Source = {
-        id: uid(),
-        title: generateInitialTitle(),
-        type: 'Scenario',
-        selected: true,
-        content: data.scenario,
-        createdAt: timestamp,
-      };
-
-      // データベースに保存
-      await createScenario(newScenario);
-      setScenarios([...scenarios, newScenario]);
-      setEditingSource(newScenario);
-    } catch (error) {
+      // ジョブ情報を保存
+      setActiveJobs(prev => new Map(prev).set(jobId, { itemId: newItemId, targetTab: 'scenario', loadingItem }));
+    } catch (error: any) {
       console.error('Scenario generation error:', error);
-    } finally {
       setLoading(false);
     }
   };
