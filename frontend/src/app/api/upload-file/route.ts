@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// @ts-expect-error - pdf-parse doesn't have proper types
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore - pdf-parse doesn't have proper types
 import * as pdfParseModule from 'pdf-parse';
 
 // Get the default export properly
