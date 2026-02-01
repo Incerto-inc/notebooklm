@@ -1,0 +1,75 @@
+name: Supabase PR Check
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+jobs:
+  validate-migrations:
+    name: Validate Supabase Migrations
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start Supabase Local
+        run: |
+          supabase start
+        env:
+          SUPABASE_DB_PASSWORD: postgres
+
+      - name: Validate migrations (dry run)
+        run: supabase db push --dry-run
+        env:
+          SUPABASE_DB_PASSWORD: postgres
+
+      - name: Generate TypeScript types
+        run: |
+          supabase gen types typescript --local > frontend/src/lib/supabase/types.ts
+
+      - name: Check for TypeScript errors
+        run: |
+          cd frontend
+          bunx tsc --noEmit
+
+  lint-check:
+    name: Lint Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: |
+          bun install
+          cd frontend && bun install
+
+      - name: Run ESLint
+        run: |
+          cd frontend
+          bun run lint
