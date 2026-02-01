@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - pdf-parse doesn't have proper types
 import * as pdfParseModule from 'pdf-parse';
 
