@@ -9,7 +9,7 @@ DO $$ BEGIN
 END $$;
 
 -- Table: styles
-CREATE TABLE "styles" (
+CREATE TABLE IF NOT EXISTS "styles" (
     "id" TEXT PRIMARY KEY,
     "title" TEXT NOT NULL,
     "type" TEXT NOT NULL,
@@ -23,7 +23,7 @@ CREATE TABLE "styles" (
 );
 
 -- Table: sources
-CREATE TABLE "sources" (
+CREATE TABLE IF NOT EXISTS "sources" (
     "id" TEXT PRIMARY KEY,
     "title" TEXT NOT NULL,
     "type" TEXT NOT NULL,
@@ -37,7 +37,7 @@ CREATE TABLE "sources" (
 );
 
 -- Table: scenarios
-CREATE TABLE "scenarios" (
+CREATE TABLE IF NOT EXISTS "scenarios" (
     "id" TEXT PRIMARY KEY,
     "title" TEXT NOT NULL,
     "type" TEXT NOT NULL,
@@ -50,7 +50,7 @@ CREATE TABLE "scenarios" (
 );
 
 -- Table: chat_messages
-CREATE TABLE "chat_messages" (
+CREATE TABLE IF NOT EXISTS "chat_messages" (
     "id" TEXT PRIMARY KEY,
     "role" TEXT NOT NULL,
     "content" TEXT NOT NULL,
@@ -59,7 +59,7 @@ CREATE TABLE "chat_messages" (
 );
 
 -- Table: jobs
-CREATE TABLE "jobs" (
+CREATE TABLE IF NOT EXISTS "jobs" (
     "id" TEXT PRIMARY KEY,
     "type" "JobType" NOT NULL,
     "status" "JobStatus" NOT NULL DEFAULT 'PENDING',
@@ -76,6 +76,6 @@ CREATE TABLE "jobs" (
 );
 
 -- Indexes
-CREATE INDEX "jobs_status_idx" ON "jobs"("status");
-CREATE INDEX "jobs_type_status_idx" ON "jobs"("type", "status");
-CREATE INDEX "jobs_createdAt_idx" ON "jobs"("createdAt");
+CREATE INDEX IF NOT EXISTS "jobs_status_idx" ON "jobs"("status");
+CREATE INDEX IF NOT EXISTS "jobs_type_status_idx" ON "jobs"("type", "status");
+CREATE INDEX IF NOT EXISTS "jobs_createdAt_idx" ON "jobs"("createdAt");
