@@ -6,18 +6,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 NotebookLM クローン - YouTuber向け動画制作支援ツール。GoogleのNotebookLMのUIをベースに、スタイル収集、ソース管理、AIディスカッション、動画シナリオ作成を一元的に行うアプリケーションです。
 
+## ディレクトリ構成
+
+このプロジェクトは**モノレポ構成**です：
+- **ルートディレクトリ**: Prismaスキーマ、マイグレーション、Supabase設定、E2Eテスト
+- **frontend/**: Next.jsアプリケーション（フロントエンド + API Routes）
+
+```
+├── frontend/             # Next.jsアプリケーション
+│   ├── src/
+│   ├── package.json
+│   └── ...
+├── prisma/              # Prismaスキーマ・マイグレーション（ルート）
+├── supabase/            # Supabaseローカル環境設定
+├── e2e/                 # Playwright E2Eテスト（ルート）
+├── playwright.config.ts # Playwright設定（ルート）
+└── package.json         # ルートpackage.json
+```
+
 ## 開発環境
 
 このプロジェクトはTypeScriptで記述されています。**必ず bun を使用してください**。
 
 ```bash
-# インストールとセットアップ
-bun install              # 依存関係のインストール（ルートディレクトリで実行）
+# インストールとセットアップ（ルートディレクトリで実行）
+bun install              # 依存関係のインストール
 supabase start           # Supabase ローカル環境の起動（初回のみ）
 
-# 開発
-bun run dev              # 開発サーバーの起動 (http://localhost:3000)
-bun run build            # プロダクションビルド
+# 開発サーバー起動
+bun run dev              # http://localhost:3000
+
+# ビルド・リント
+bun run build            # プロダクションビルド（frontend/）
 bun run lint             # ESLintによるリント
 ```
 
@@ -44,50 +64,15 @@ bunx playwright show-report          # レポート表示
 
 テスト設定は `playwright.config.ts`（ルートディレクトリ）にあり、Playwrightが自動的に開発サーバーを起動します。
 
-## プロジェクト構造
+## CI/CD
 
-```
-frontend/
-├── src/
-│   ├── app/
-│   │   ├── api/           # APIルート (Next.js App Router)
-│   │   │   ├── jobs/            # ジョブキューシステム
-│   │   │   │   ├── route.ts           # ジョブ作成
-│   │   │   │   └── [jobId]/route.ts    # ジョブステータス確認
-│   │   │   ├── analyze-video/   # YouTube動画のAI分析
-│   │   │   ├── analyze-file/    # ファイルのAI分析
-│   │   │   ├── chat/            # AIチャット（ストリーミング対応）
-│   │   │   ├── chat-messages/   # チャット履歴のCRUD
-│   │   │   ├── sources/         # ソースのCRUD
-│   │   │   ├── styles/          # スタイルのCRUD
-│   │   │   ├── scenarios/       # シナリオのCRUD
-│   │   │   ├── upload-file/     # ファイルアップロード
-│   │   │   └── generate-scenario/ # シナリオ生成
-│   │   ├── layout.tsx    # ルートレイアウト
-│   │   └── page.tsx      # メインページ（NotebookLM UI）
-│   ├── components/       # Reactコンポーネント
-│   │   ├── FileUploadZone.tsx    # ファイルアップロードUI
-│   │   └── VideoUploadDialog.tsx # 動画URL入力ダイアログ
-│   ├── hooks/           # カスタムフック
-│   │   ├── useLocalStorage.ts     # localStorage管理
-│   │   ├── useSupabaseData.ts     # Supabaseデータ管理
-│   │   └── useJobPolling.ts       # ジョブポーリング（非同期AI処理用）
-│   └── lib/
-│       ├── job-processor.ts       # バックグラウンドジョブプロセッサー
-│       ├── openrouter.ts          # OpenRouter APIクライアント
-│       ├── prisma.ts              # Prismaクライアント（シングルトン）
-│       ├── supabase/
-│       │   ├── client.ts          # Supabaseクライアント
-│       │   └── types.ts           # Supabase型定義（自動生成）
-│       └── types.ts               # アプリケーション型定義
-e2e/                    # Playwright E2Eテスト
-prisma/
-├── schema.prisma       # データベーススキーマ定義
-└── migrations/         # データベースマイグレーション
-supabase/               # Supabase設定（ローカル開発環境）
-playwright.config.ts    # Playwright設定（ルート）
-.env                    # 環境変数（Git管理外）
-```
+**GitHub Actions** - mainブランチへのマージ時に自動的にデータベーススキーマを更新します：
+
+- ワークフロー: `.github/workflows/prisma-migrate-production.yml`
+- トリガー: mainブランチへのpush、または手動実行
+- 必要なSecret: `DATABASE_URL`（本番DB接続文字列）
+
+詳細: `docs/github-actions-setup.md`
 
 ## アーキテクチャ
 
@@ -196,7 +181,7 @@ AI処理を完全非同期化し、ユーザー体験を改善するジョブキ
 - `error`: エラーメッセージ（オプション）
 - `retryCount`: リトライ回数（デフォルト0）
 - `maxRetries`: 最大リトライ回数（デフォルト3）
-- `priority`: 優先度（デフォルト0）
+- `priority`: 優先度（デフォルト0、高い数値ほど高優先度）
 - `startedAt`: 処理開始時刻
 - `completedAt`: 処理完了時刻
 - `createdAt`: ジョブ作成時刻
@@ -324,8 +309,9 @@ generator client {
 
 **重要ポイント**:
 - Prisma Clientの出力先を`.prisma/client`に設定（`@prisma/client`ではない）
-- モノレpo構成（Prismaはルート、Next.jsは`frontend/`サブディレクトリ）に対応
-- `postinstall`スクリプトで自動生成：`cd .. && npx prisma generate`
+- モノレポ構成（Prismaはルート、Next.jsは`frontend/`サブディレクトリ）に対応
+- `postinstall`スクリプト（`frontend/package.json`）で自動生成：`cd .. && npx prisma generate`
+  - `frontend/`からルートディレクトリ（`../`）に移動してprisma generateを実行
 - 環境変数`DATABASE_URL`はVercelダッシュボードから設定
 
 **Vercelへのデプロイ手順**:
@@ -335,9 +321,10 @@ generator client {
 4. 出力ディレクトリ: `.next`
 
 **トラブルシューティング**:
-- `@prisma/client did not initialize yet`: Prisma Clientの出力先を確認
+- `@prisma/client did not initialize yet`: Prisma Clientの出力先を確認（`../frontend/node_modules/.prisma/client`）
 - `Cannot find module 'dotenv/config'`: `prisma.config.ts`を削除（Vercelは自動で環境変数を設定）
 - `Generating client into ... is not allowed`: 出力先を`.prisma/client`に変更
+- `prisma generate`が実行されない: `frontend/package.json`のpostinstallスクリプトを確認
 
 ## 追加のドキュメント
 
@@ -345,9 +332,4 @@ generator client {
 - `DESIGN.md`: NotebookLM UIの詳細な設計思想
 - `docs/openrouter-tool-calling.md`: OpenRouterのツール呼び出し機能
 - `docs/openrouter-video-inputs.md`: OpenRouterの動画入力機能
-
-**関連スキル**:
-- `prisma-vercel-deployment`: Prisma + Vercel デプロイのトラブルシューティング手順
-  - モノレポ構成でのPrisma Client生成
-  - Vercelデプロイ時のよくあるエラーと解決策
-  - 環境変数設定のベストプラクティス
+- `docs/github-actions-setup.md`: GitHub Actionsの設定手順

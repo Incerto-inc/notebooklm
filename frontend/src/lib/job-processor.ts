@@ -3,6 +3,7 @@ import { OpenRouter } from '@openrouter/sdk';
 import type { ChatGenerationParamsPluginFileParser } from '@openrouter/sdk/models';
 import type { AnalyzeVideoInput, AnalyzeFileInput, GenerateScenarioInput, JobError } from './types';
 import { isAnalyzeVideoInput, isAnalyzeFileInput, isGenerateScenarioInput } from './types';
+import { scenarioPrompts } from './prompts';
 
 // OpenRouter SDKに含まれていないファイルコンテンツ型を拡張
 type FileContentItem = {
@@ -205,31 +206,36 @@ async function processGenerateScenario(input: GenerateScenarioInput) {
     .map((m) => `${m.role}: ${m.content}`)
     .join('\n\n');
 
-  const prompt = `以下の情報を元に、YouTube動画のシナリオを作成してください。
+  // 1回目：草案生成
+  const draftPrompt = scenarioPrompts.generateDraft(
+    styleContents,
+    sourceContents,
+    chatText
+  );
 
-スタイル情報:
-${styleContents.join('\n\n')}
-
-ソース情報:
-${sourceContents.join('\n\n')}
-
-ディスカッション履歴:
-${chatText}
-
-これらを統合して、以下の構成でシナリオを作成してください：
-1. 導入（フック）
-2. 本論
-3. まとめ
-
-日本語でMarkdown形式で出力してください。`;
-
-  const result = await openRouter.chat.send({
+  const draftResult = await openRouter.chat.send({
     model: SCENARIO_MODEL,
-    messages: [{ role: 'user', content: prompt }],
+    messages: [{ role: 'user', content: draftPrompt }],
     stream: false,
   });
 
-  const scenario = (result.choices[0]?.message?.content as string) || '';
+  const draftScenario = (draftResult.choices[0]?.message?.content as string) || '';
+
+  // 2回目：改善・洗練（1回目の結果をコンテキストに含める）
+  const refinePrompt = scenarioPrompts.refineScenario(
+    styleContents,
+    sourceContents,
+    chatText,
+    draftScenario
+  );
+
+  const finalResult = await openRouter.chat.send({
+    model: SCENARIO_MODEL,
+    messages: [{ role: 'user', content: refinePrompt }],
+    stream: false,
+  });
+
+  const scenario = (finalResult.choices[0]?.message?.content as string) || '';
   return { scenario };
 }
 
