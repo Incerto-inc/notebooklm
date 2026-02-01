@@ -6,6 +6,11 @@ on:
       - main
   workflow_dispatch:
 
+# 並列実行を抑制して接続プール上限を回避
+concurrency:
+  group: prisma-migration
+  cancel-in-progress: false
+
 jobs:
   migrate:
     name: Run Prisma Migrate on Production
@@ -28,6 +33,8 @@ jobs:
       - name: Generate Prisma Client
         run: bunx prisma generate
         env:
+          # 注: poolerモード（Session mode）ではなく直接接続モードを使用すること
+          # poolerモードは接続数が制限されているため、並列実行時にエラーになる可能性があります
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       - name: Run Prisma Migrate Deploy
