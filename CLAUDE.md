@@ -9,7 +9,7 @@ NotebookLM クローン - YouTuber向け動画制作支援ツール。GoogleのN
 ## ディレクトリ構成
 
 このプロジェクトは**モノレポ構成**です：
-- **ルートディレクトリ**: Prismaスキーマ、マイグレーション、Supabase設定、E2Eテスト
+- **ルートディレクトリ**: Supabaseマイグレーション、設定、E2Eテスト
 - **frontend/**: Next.jsアプリケーション（フロントエンド + API Routes）
 
 ```
@@ -17,8 +17,8 @@ NotebookLM クローン - YouTuber向け動画制作支援ツール。GoogleのN
 │   ├── src/
 │   ├── package.json
 │   └── ...
-├── prisma/              # Prismaスキーマ・マイグレーション（ルート）
-├── supabase/            # Supabaseローカル環境設定
+├── supabase/            # Supabaseマイグレーション・設定
+│   └── migrations/      # マイグレーションファイル
 ├── e2e/                 # Playwright E2Eテスト（ルート）
 ├── playwright.config.ts # Playwright設定（ルート）
 └── package.json         # ルートpackage.json
@@ -68,9 +68,12 @@ bunx playwright show-report          # レポート表示
 
 **GitHub Actions** - mainブランチへのマージ時に自動的にデータベーススキーマを更新します：
 
-- ワークフロー: `.github/workflows/prisma-migrate-production.yml`
+- ワークフロー: `.github/workflows/supabase-migrate-production.yml`
 - トリガー: mainブランチへのpush、または手動実行
-- 必要なSecret: `DATABASE_URL`（本番DB接続文字列）
+- 必要なSecret:
+  - `DATABASE_URL`: 本番DB接続文字列
+  - `SUPABASE_ACCESS_TOKEN`: Supabaseパーソナルアクセストークン
+  - `SUPABASE_PROJECT_ID`: SupabaseプロジェクトID
 
 詳細: `docs/github-actions-setup.md`
 
@@ -148,52 +151,53 @@ AI処理を完全非同期化し、ユーザー体験を改善するジョブキ
 
 ### データ管理アーキテクチャ
 
-**Supabase + Prisma**によるデータ永続化：
+**Supabase**によるデータ永続化：
 
 - **データベース**: Supabase Local（PostgreSQL on port 54321）
-- **ORM**: Prisma（`prisma/schema.prisma`でスキーマ定義）
+- **マイグレーション**: Supabaseネイティブマイグレーション（`supabase/migrations/`）
+- **型定義**: Supabase自動生成型（`frontend/src/lib/supabase/types.ts`）
 - **フロントエンド統合**: `useSupabaseData.ts`フックでデータ管理
   - 初期マウント時にSupabaseから全データをフェッチ
-  - CRUD操作はNext.js APIルート経由でPrismaにアクセス
+  - CRUD操作はNext.js APIルート経由でSupabaseにアクセス
   - 楽観的更新：即座にローカル状態を更新し、バックグラウンドでAPI呼び出し
 
 **APIルートパターン**（`/api/sources`等で共通）:
-- `GET`: 全データ取得（`findMany`）
-- `POST`: 作成（`create`）
-- `PUT`: 更新（`update`）
-- `DELETE`: 削除（`delete`）
+- `GET`: 全データ取得
+- `POST`: 作成
+- `PUT`: 更新
+- `DELETE`: 削除
 
-### Prismaスキーマ設計
+### Supabaseスキーマ設計
 
-5つの主要モデル（`prisma/schema.prisma`）:
-- **Style**: YouTuberのノウハウ（編集テクニック、話し方等）
-- **Source**: 参考動画/資料（要約、ポイント）
-- **Scenario**: 動画シナリオ
-- **ChatMessage**: チャット履歴
-- **Job**: 非同期AI処理ジョブ（ジョブキューシステム用）
+5つの主要テーブル（`supabase/migrations/`）:
+- **styles**: YouTuberのノウハウ（編集テクニック、話し方等）
+- **sources**: 参考動画/資料（要約、ポイント）
+- **scenarios**: 動画シナリオ
+- **chat_messages**: チャット履歴
+- **jobs**: 非同期AI処理ジョブ（ジョブキューシステム用）
 
-**Jobモデルのフィールド**:
-- `id`: UUID（主キー）
-- `type`: ジョブタイプ（`ANALYZE_VIDEO`, `ANALYZE_FILE`, `GENERATE_SCENARIO`）
-- `status`: ジョブステータス（`PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`, `CANCELLED`）
-- `input`: 処理入力パラメータ（JSON）
-- `result`: 処理結果（JSON、オプション）
+**Jobsテーブルのフィールド**:
+- `id`: TEXT（主キー）
+- `type`: ジョブタイプ（`JobType`: `ANALYZE_VIDEO`, `ANALYZE_FILE`, `GENERATE_SCENARIO`）
+- `status`: ジョブステータス（`JobStatus`: `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`, `CANCELLED`）
+- `input`: 処理入力パラメータ（JSONB）
+- `result`: 処理結果（JSONB、オプション）
 - `error`: エラーメッセージ（オプション）
 - `retryCount`: リトライ回数（デフォルト0）
 - `maxRetries`: 最大リトライ回数（デフォルト3）
 - `priority`: 優先度（デフォルト0、高い数値ほど高優先度）
-- `startedAt`: 処理開始時刻
-- `completedAt`: 処理完了時刻
-- `createdAt`: ジョブ作成時刻
-- `updatedAt`: 最終更新時刻
+- `startedAt`: 処理開始時刻（TIMESTAMP）
+- `completedAt`: 処理完了時刻（TIMESTAMP）
+- `createdAt`: ジョブ作成時刻（TIMESTAMP）
+- `updatedAt`: 最終更新時刻（TIMESTAMP）
 
-**Style/Source/Scenario/ChatMessageモデル共通のフィールド**:
-- `id`: 主キー（文字列）
+**Styles/Sources/Scenarios/ChatMessagesテーブル共通のフィールド**:
+- `id`: 主キー（TEXT）
 - `title`, `type`, `content`: コンテンツ
-- `selected`: UI選択状態
-- `createdAt`: タイムスタンプ形式（`yyyy年mm月dd日HH.mm.md`）
-- `createdAtDateTime`: PostgreSQL DateTime（ソート用）
-- `videoUrl`: YouTube URL（Style/Sourceのみ、オプション）
+- `selected`: UI選択状態（BOOLEAN）
+- `createdAt`: タイムスタンプ形式（TEXT: `yyyy年mm月dd日HH.mm.md`）
+- `created_at`: PostgreSQL Timestamp（デフォルトCURRENT_TIMESTAMP）
+- `video_url`: YouTube URL（Styles/Sourcesのみ、オプション）
 
 ### OpenRouter統合
 
@@ -276,7 +280,6 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 - **Tailwind CSS 4**: スタイリング
 - **@openrouter/sdk**: AI APIクライアント
 - **@supabase/supabase-js**: Supabaseクライアント
-- **Prisma**: ORM（データベースアクセス）
 - **pdf-parse**: PDF解析
 - **Playwright**: E2Eテスト
 
@@ -287,44 +290,15 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 3. **マイグレーションルール**:
    - 既存マイグレーションの絶対的な書き換え禁止
    - 修正が必要な場合は新規マイグレーションを作成
-   - 適用は`supabase db push --local`を使用（`db reset`はデータ消えるため禁止）
-4. **Prisma Client**: `lib/prisma.ts`でシングルトンパターン実装（ホットリロード対応）
-5. **Hydrationエラー**: クライアントサイドのみのコードは`mounted`チェックで保護
-6. **データフロー**: Supabase → API Route → Prisma → フロントエンド（`useSupabaseData`）
-7. **非同期AI処理**: AI処理はすべてジョブキューシステム経由で非同期実行
+   - 適用は`supabase db push --local`を使用（ローカル開発の場合）
+   - 型定義の再生成: `supabase gen types typescript --local > frontend/src/lib/supabase/types.ts`
+4. **Hydrationエラー**: クライアントサイドのみのコードは`mounted`チェックで保護
+5. **データフロー**: Supabase → API Route → フロントエンド（`useSupabaseData`）
+6. **非同期AI処理**: AI処理はすべてジョブキューシステム経由で非同期実行
    - クライアントは`/api/jobs`でジョブ作成
    - ポーリングで`/api/jobs/[jobId]`を定期的に確認
    - UIは即座に更新され、バックグラウンドで処理完了を待機
-8. **ストリーミング**: チャットはリアルタイムでストリーミングされるため、状態更新に注意
-
-## Vercelデプロイ時の注意点
-
-**Prisma Client生成設定**（`prisma/schema.prisma`）:
-```prisma
-generator client {
-  provider = "prisma-client-js"
-  output   = "../frontend/node_modules/.prisma/client"
-}
-```
-
-**重要ポイント**:
-- Prisma Clientの出力先を`.prisma/client`に設定（`@prisma/client`ではない）
-- モノレポ構成（Prismaはルート、Next.jsは`frontend/`サブディレクトリ）に対応
-- `postinstall`スクリプト（`frontend/package.json`）で自動生成：`cd .. && npx prisma generate`
-  - `frontend/`からルートディレクトリ（`../`）に移動してprisma generateを実行
-- 環境変数`DATABASE_URL`はVercelダッシュボードから設定
-
-**Vercelへのデプロイ手順**:
-1. GitHubリポジトリと連携
-2. 環境変数を設定（DATABASE_URL, OPENROUTER_API_KEY等）
-3. ビルドコマンド: `cd frontend && bun run build`
-4. 出力ディレクトリ: `.next`
-
-**トラブルシューティング**:
-- `@prisma/client did not initialize yet`: Prisma Clientの出力先を確認（`../frontend/node_modules/.prisma/client`）
-- `Cannot find module 'dotenv/config'`: `prisma.config.ts`を削除（Vercelは自動で環境変数を設定）
-- `Generating client into ... is not allowed`: 出力先を`.prisma/client`に変更
-- `prisma generate`が実行されない: `frontend/package.json`のpostinstallスクリプトを確認
+7. **ストリーミング**: チャットはリアルタイムでストリーミングされるため、状態更新に注意
 
 ## 追加のドキュメント
 
