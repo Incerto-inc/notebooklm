@@ -6,9 +6,11 @@ export interface Source {
   content: string;
   createdAt: string;
   videoUrl?: string; // YouTube動画URL（オプション）
+  loading?: boolean; // クライアントのみのプロパティ（ローディング状態）
 }
 
 export interface ChatMessage {
+  id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp?: string;
