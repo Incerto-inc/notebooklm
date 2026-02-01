@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
-import { createCrudHandlers } from '@/lib/api-utils';
+import { createCrudHandlers } from '@/lib/supabase-api-utils';
 
-const handlers = createCrudHandlers('Scenario', 'scenario');
+const handlers = createCrudHandlers('scenarios', 'scenario');
 
 export const GET = handlers.getAll;
 export const POST = handlers.create;

@@ -1,4 +1,4 @@
-import { prisma } from './prisma';
+import { createClient } from './supabase/server';
 import { OpenRouter } from '@openrouter/sdk';
 import type { ChatGenerationParamsPluginFileParser } from '@openrouter/sdk/models';
 import type { AnalyzeVideoInput, AnalyzeFileInput, GenerateScenarioInput, JobError } from './types';
@@ -18,6 +18,8 @@ type ExtendedMessageContent = Array<
   { type: 'text'; text: string } | FileContentItem
 >;
 
+type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
+
 const openRouter = new OpenRouter({
   apiKey: process.env.OPENROUTER_API_KEY || '',
 });
@@ -29,56 +31,33 @@ const SCENARIO_MODEL = process.env.OPENROUTER_MODEL_SCENARIO || 'google/gemini-2
 const JOB_TIMEOUT = 5 * 60 * 1000; // 5分
 
 export async function processJobAsync(jobId: string) {
-  // タイムアウト設定
+  const supabase = await createClient(); // 1回だけ呼び出し
+
   const timeoutId = setTimeout(async () => {
-    const job = await prisma.job.findUnique({ where: { id: jobId } });
-    if (job && job.status === 'PROCESSING') {
-      await prisma.job.update({
-        where: { id: jobId },
-        data: {
-          status: 'FAILED',
-          error: 'Job timeout',
-          completedAt: new Date(),
-        },
-      });
-    }
+    await handleJobTimeout(supabase, jobId);
   }, JOB_TIMEOUT);
 
   try {
-    // ステータスをPROCESSINGに更新
-    await prisma.job.update({
-      where: { id: jobId },
-      data: {
-        status: 'PROCESSING',
-        startedAt: new Date(),
-      },
-    });
-
-    // AI処理実行
-    const result = await executeAIProcessing(jobId);
-
-    // 完了
-    await prisma.job.update({
-      where: { id: jobId },
-      data: {
-        status: 'COMPLETED',
-        result,
-        completedAt: new Date(),
-      },
-    });
+    await updateJobStatus(supabase, jobId, 'PROCESSING');
+    const result = await executeAIProcessing(supabase, jobId);
+    await updateJobStatus(supabase, jobId, 'COMPLETED');
   } catch (error: any) {
-    // エラーハンドリング（リトライ or 失敗）
-    await handleJobError(jobId, error);
+    await handleJobError(supabase, jobId, error);
   } finally {
     clearTimeout(timeoutId);
   }
 }
 
-async function executeAIProcessing(jobId: string) {
-  const job = await prisma.job.findUnique({ where: { id: jobId } });
-  if (!job) throw new Error('Job not found');
+async function executeAIProcessing(supabase: SupabaseClient, jobId: string) {
+  const { data: job, error } = await supabase
+    .from('jobs')
+    .select('*')
+    .eq('id', jobId)
+    .single();
 
-  const input = job.input;
+  if (error || !job) throw new Error('Job not found');
+
+  const input = job.input as any;
 
   switch (job.type) {
     case 'ANALYZE_VIDEO':
@@ -239,34 +218,83 @@ async function processGenerateScenario(input: GenerateScenarioInput) {
   return { scenario };
 }
 
-async function handleJobError(jobId: string, error: JobError | Error) {
-  const job = await prisma.job.findUnique({ where: { id: jobId } });
+// ジョブステータス更新
+async function updateJobStatus(
+  supabase: SupabaseClient,
+  jobId: string,
+  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED',
+  error?: string
+) {
+  const updateData: any = {
+    status,
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (status === 'PROCESSING') {
+    updateData.startedAt = new Date().toISOString();
+  } else if (status === 'COMPLETED' || status === 'FAILED') {
+    updateData.completedAt = new Date().toISOString();
+  }
+
+  if (error) {
+    updateData.error = error;
+  }
+
+  await supabase.from('jobs').update(updateData).eq('id', jobId);
+}
+
+// タイムアウト処理
+async function handleJobTimeout(supabase: SupabaseClient, jobId: string) {
+  const { data: job } = await supabase
+    .from('jobs')
+    .select('*')
+    .eq('id', jobId)
+    .single();
+
+  if (job && job.status === 'PROCESSING') {
+    await updateJobStatus(supabase, jobId, 'FAILED', 'Job timeout');
+  }
+}
+
+async function handleJobError(
+  supabase: SupabaseClient,
+  jobId: string,
+  error: JobError | Error
+) {
+  const { data: job } = await supabase
+    .from('jobs')
+    .select('*')
+    .eq('id', jobId)
+    .single();
+
   if (!job) return;
 
   // リトライ可能か判定
   if (isRetryableError(error) && job.retryCount < job.maxRetries) {
     const delay = Math.min(1000 * Math.pow(2, job.retryCount), 30000);
 
-    await prisma.job.update({
-      where: { id: jobId },
-      data: {
+    await supabase
+      .from('jobs')
+      .update({
         status: 'PENDING',
-        retryCount: { increment: 1 },
+        retryCount: job.retryCount + 1,
         error: error.message,
-      },
-    });
+        updatedAt: new Date().toISOString(),
+      })
+      .eq('id', jobId);
 
     setTimeout(() => processJobAsync(jobId), delay);
   } else {
     // 永続的エラーまたはリトライ回数超過
-    await prisma.job.update({
-      where: { id: jobId },
-      data: {
+    await supabase
+      .from('jobs')
+      .update({
         status: 'FAILED',
         error: error.message,
-        completedAt: new Date(),
-      },
-    });
+        completedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      .eq('id', jobId);
   }
 }
 

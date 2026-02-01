@@ -7,31 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       _prisma_migrations: {
@@ -91,12 +66,61 @@ export type Database = {
         }
         Relationships: []
       }
+      jobs: {
+        Row: {
+          completedAt: string | null
+          createdAt: string
+          error: string | null
+          id: string
+          input: Json
+          maxRetries: number
+          priority: number
+          result: Json | null
+          retryCount: number
+          startedAt: string | null
+          status: Database["public"]["Enums"]["JobStatus"]
+          type: Database["public"]["Enums"]["JobType"]
+          updatedAt: string
+        }
+        Insert: {
+          completedAt?: string | null
+          createdAt?: string
+          error?: string | null
+          id: string
+          input: Json
+          maxRetries?: number
+          priority?: number
+          result?: Json | null
+          retryCount?: number
+          startedAt?: string | null
+          status?: Database["public"]["Enums"]["JobStatus"]
+          type: Database["public"]["Enums"]["JobType"]
+          updatedAt: string
+        }
+        Update: {
+          completedAt?: string | null
+          createdAt?: string
+          error?: string | null
+          id?: string
+          input?: Json
+          maxRetries?: number
+          priority?: number
+          result?: Json | null
+          retryCount?: number
+          startedAt?: string | null
+          status?: Database["public"]["Enums"]["JobStatus"]
+          type?: Database["public"]["Enums"]["JobType"]
+          updatedAt?: string
+        }
+        Relationships: []
+      }
       scenarios: {
         Row: {
           content: string
           created_at: string
           createdAt: string
           id: string
+          loading: boolean
           selected: boolean
           title: string
           type: string
@@ -107,6 +131,7 @@ export type Database = {
           created_at?: string
           createdAt?: string
           id: string
+          loading?: boolean
           selected?: boolean
           title: string
           type: string
@@ -117,6 +142,7 @@ export type Database = {
           created_at?: string
           createdAt?: string
           id?: string
+          loading?: boolean
           selected?: boolean
           title?: string
           type?: string
@@ -130,6 +156,7 @@ export type Database = {
           created_at: string
           createdAt: string
           id: string
+          loading: boolean
           selected: boolean
           title: string
           type: string
@@ -141,6 +168,7 @@ export type Database = {
           created_at?: string
           createdAt?: string
           id: string
+          loading?: boolean
           selected?: boolean
           title: string
           type: string
@@ -152,6 +180,7 @@ export type Database = {
           created_at?: string
           createdAt?: string
           id?: string
+          loading?: boolean
           selected?: boolean
           title?: string
           type?: string
@@ -166,6 +195,7 @@ export type Database = {
           created_at: string
           createdAt: string
           id: string
+          loading: boolean
           selected: boolean
           title: string
           type: string
@@ -177,6 +207,7 @@ export type Database = {
           created_at?: string
           createdAt?: string
           id: string
+          loading?: boolean
           selected?: boolean
           title: string
           type: string
@@ -188,6 +219,7 @@ export type Database = {
           created_at?: string
           createdAt?: string
           id?: string
+          loading?: boolean
           selected?: boolean
           title?: string
           type?: string
@@ -204,7 +236,8 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      JobStatus: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED" | "CANCELLED"
+      JobType: "ANALYZE_VIDEO" | "ANALYZE_FILE" | "GENERATE_SCENARIO"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -330,11 +363,11 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
-    Enums: {},
+    Enums: {
+      JobStatus: ["PENDING", "PROCESSING", "COMPLETED", "FAILED", "CANCELLED"],
+      JobType: ["ANALYZE_VIDEO", "ANALYZE_FILE", "GENERATE_SCENARIO"],
+    },
   },
 } as const
 
