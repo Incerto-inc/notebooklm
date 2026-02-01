@@ -259,7 +259,7 @@ async function handleJobTimeout(supabase: SupabaseClient, jobId: string) {
 async function handleJobError(
   supabase: SupabaseClient,
   jobId: string,
-  error: JobError | Error
+  error: unknown
 ) {
   const { data: job } = await supabase
     .from('jobs')
@@ -268,6 +268,8 @@ async function handleJobError(
     .single();
 
   if (!job) return;
+
+  const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
   // リトライ可能か判定
   if (isRetryableError(error) && job.retryCount < job.maxRetries) {
@@ -278,7 +280,7 @@ async function handleJobError(
       .update({
         status: 'PENDING',
         retryCount: job.retryCount + 1,
-        error: error.message,
+        error: errorMessage,
         updatedAt: new Date().toISOString(),
       })
       .eq('id', jobId);
@@ -290,7 +292,7 @@ async function handleJobError(
       .from('jobs')
       .update({
         status: 'FAILED',
-        error: error.message,
+        error: errorMessage,
         completedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       })
@@ -298,14 +300,27 @@ async function handleJobError(
   }
 }
 
-function isRetryableError(error: JobError | Error): boolean {
+function isRetryableError(error: unknown): boolean {
+  if (!(error instanceof Error) && !isJobError(error)) {
+    return false;
+  }
+
   const errorMessage = error instanceof Error ? error.message : error.message;
-  const errorCode = 'code' in error ? error.code : undefined;
-  const errorStatus = 'status' in error ? error.status : undefined;
+  const errorCode = isJobError(error) ? error.code : undefined;
+  const errorStatus = isJobError(error) ? error.status : undefined;
 
   if (errorCode === 'NETWORK_TIMEOUT') return true;
   if (errorStatus && errorStatus >= 500 && errorStatus < 600) return true;
   if (errorMessage?.includes('ECONNRESET')) return true;
   if (errorMessage?.includes('ETIMEDOUT')) return true;
   return false;
+}
+
+function isJobError(error: unknown): error is JobError {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof error.message === 'string'
+  );
 }
