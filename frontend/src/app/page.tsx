@@ -33,8 +33,6 @@ export default function NotebookLMPage() {
     styles,
     scenarios,
     chatMessages,
-    mounted,
-    loading: dataLoading,
     createSource,
     updateSource,
     deleteSource,
@@ -45,7 +43,6 @@ export default function NotebookLMPage() {
     updateScenario,
     deleteScenario,
     addChatMessage,
-    clearChatMessages,
     setSources,
     setStyles,
     setScenarios,
@@ -169,7 +166,7 @@ export default function NotebookLMPage() {
     for (const [jobId, jobInfo] of activeJobs.entries()) {
       addJob(jobId, jobInfo);
     }
-  }, [isRestoring, restoreResult, addJob, styles, sources, scenarios]);
+  }, [isRestoring, restoreResult, addJob, styles, sources, scenarios, setScenarios, setSources, setStyles]);
 
   const suggestedPrompts = sources.length > 0 ? [
     "このドキュメントの主なポイントを要約してください",
@@ -347,11 +344,12 @@ export default function NotebookLMPage() {
 
       // ジョブ情報を保存（useMultiJobPollingに追加）
       addJob(jobId, { itemId: newItemId, targetTab: activeTab, loadingItem: savedItem });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Job creation error:', error);
+      const errorMessage = error instanceof Error ? error.message : '不明なエラーが発生しました';
       const errorItem: Source = {
         ...savedItem,
-        content: `# エラー\n\n${error.message}`,
+        content: `# エラー\n\n${errorMessage}`,
         loading: false,
       };
       // DBを更新してエラー状態を保存
@@ -402,7 +400,7 @@ export default function NotebookLMPage() {
 
       reader.onloadend = async () => {
         try {
-          let inputData: any = {
+          const inputData: Record<string, unknown> = {
             filename: file.name,
             fileType: fileType,
             mode: activeTab,
@@ -430,11 +428,12 @@ export default function NotebookLMPage() {
 
           // ジョブ情報を保存（useMultiJobPollingに追加）
           addJob(jobId, { itemId: newItemId, targetTab: activeTab, loadingItem: savedItem });
-        } catch (error: any) {
+        } catch (error: unknown) {
           console.error('Job creation error:', error);
+          const errorMessage = error instanceof Error ? error.message : '不明なエラーが発生しました';
           const errorItem: Source = {
             ...savedItem,
-            content: `# エラー\n\n${error.message}`,
+            content: `# エラー\n\n${errorMessage}`,
             loading: false,
           };
           // DBを更新してエラー状態を保存
@@ -456,11 +455,12 @@ export default function NotebookLMPage() {
         // テキストファイルはテキストとして読み込み
         reader.readAsText(file);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('File analysis error:', error);
+      const errorMessage = error instanceof Error ? error.message : '不明なエラーが発生しました';
       const errorItem: Source = {
         ...savedItem,
-        content: `# エラー\n\n${error.message}`,
+        content: `# エラー\n\n${errorMessage}`,
         loading: false,
       };
       // DBを更新してエラー状態を保存
@@ -680,10 +680,11 @@ export default function NotebookLMPage() {
 
       // ジョブ情報を保存（useMultiJobPollingに追加）
       addJob(jobId, { itemId: newItemId, targetTab: 'scenario', loadingItem: savedItem });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Scenario generation error:', error);
+      const errorMessage = error instanceof Error ? error.message : '不明なエラーが発生しました';
       // DBを更新してエラー状態を保存
-      await updateScenario(newItemId, { loading: false, content: `# エラー\n\n${error.message}` });
+      await updateScenario(newItemId, { loading: false, content: `# エラー\n\n${errorMessage}` });
       setLoading(false);
     }
   };

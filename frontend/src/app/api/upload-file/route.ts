@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// @ts-ignore - pdf-parse doesn't have proper types
+// @ts-expect-error - pdf-parse doesn't have proper types
 import * as pdfParseModule from 'pdf-parse';
 
 // Get the default export properly

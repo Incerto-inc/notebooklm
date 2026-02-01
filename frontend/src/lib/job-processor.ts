@@ -39,9 +39,9 @@ export async function processJobAsync(jobId: string) {
 
   try {
     await updateJobStatus(supabase, jobId, 'PROCESSING');
-    const result = await executeAIProcessing(supabase, jobId);
+    await executeAIProcessing(supabase, jobId);
     await updateJobStatus(supabase, jobId, 'COMPLETED');
-  } catch (error: any) {
+  } catch (error: unknown) {
     await handleJobError(supabase, jobId, error);
   } finally {
     clearTimeout(timeoutId);
@@ -57,7 +57,7 @@ async function executeAIProcessing(supabase: SupabaseClient, jobId: string) {
 
   if (error || !job) throw new Error('Job not found');
 
-  const input = job.input as any;
+  const input = job.input as unknown;
 
   switch (job.type) {
     case 'ANALYZE_VIDEO':
@@ -225,7 +225,7 @@ async function updateJobStatus(
   status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED',
   error?: string
 ) {
-  const updateData: any = {
+  const updateData: Record<string, unknown> = {
     status,
     updatedAt: new Date().toISOString(),
   };

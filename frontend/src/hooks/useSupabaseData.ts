@@ -28,7 +28,7 @@ async function fetchData(endpoint: string) {
 }
 
 // データ作成関数
-async function createData(endpoint: string, data: any) {
+async function createData(endpoint: string, data: unknown) {
   const response = await fetch(`/api${endpoint}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -41,7 +41,7 @@ async function createData(endpoint: string, data: any) {
 }
 
 // データ更新関数
-async function updateData(endpoint: string, data: any) {
+async function updateData(endpoint: string, data: unknown) {
   const response = await fetch(`/api${endpoint}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

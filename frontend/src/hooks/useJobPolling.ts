@@ -5,7 +5,7 @@ interface JobStatus {
   id: string;
   status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
   type: string;
-  result?: any;
+  result?: unknown;
   error?: string;
   startedAt?: string;
   completedAt?: string;
@@ -26,9 +26,9 @@ interface JobInfo {
 }
 
 interface UseMultiJobPollingOptions {
-  onJobComplete?: (jobId: string, jobInfo: JobInfo, result: any) => void;
+  onJobComplete?: (jobId: string, jobInfo: JobInfo, result: unknown) => void;
   onJobError?: (jobId: string, jobInfo: JobInfo, error: string) => void;
-  onPendingJobsFound?: (jobs: Array<{ id: string; type: string; input: any }>) => void;
+  onPendingJobsFound?: (jobs: Array<{ id: string; type: string; input: unknown }>) => void;
   interval?: number;
   restoreOnMount?: boolean; // ページロード時に進行中のジョブを検出
 }
