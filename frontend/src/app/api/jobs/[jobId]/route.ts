@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { createClient } from '@/lib/supabase/server';
 
 export async function GET(
   request: NextRequest,
@@ -7,11 +7,14 @@ export async function GET(
 ) {
   try {
     const { jobId } = await params;
-    const job = await prisma.job.findUnique({
-      where: { id: jobId },
-    });
+    const supabase = await createClient();
+    const { data: job, error } = await supabase
+      .from('jobs')
+      .select('*')
+      .eq('id', jobId)
+      .single();
 
-    if (!job) {
+    if (error || !job) {
       return NextResponse.json(
         { error: 'Job not found' },
         { status: 404 }
