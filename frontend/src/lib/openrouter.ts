@@ -1,4 +1,5 @@
 import { OpenRouter } from '@openrouter/sdk';
+import { chatPrompts, analyzePrompts, scenarioPrompts } from './prompts';
 
 const openRouter = new OpenRouter({
   apiKey: process.env.OPENROUTER_API_KEY || '',
@@ -15,11 +16,7 @@ export async function sendChatMessageStream(
   contextSources: string[],
   onChunk: (chunk: string) => void
 ): Promise<void> {
-  const systemPrompt = `あなたは動画制作支援AIアシスタントです。
-以下のソース情報を元に、ユーザーの質問に答えてください。
-
-ソース情報:
-${contextSources.join('\n\n---\n\n')}`;
+  const systemPrompt = chatPrompts.system(contextSources);
 
   const stream = await openRouter.chat.send({
     model: CHAT_MODEL,
@@ -42,9 +39,7 @@ export async function analyzeVideo(
   videoUrl: string,
   mode: 'style' | 'source'
 ): Promise<string> {
-  const prompt = mode === 'style'
-    ? `このYouTuber動画のスタイルを分析してください。編集テクニック、話し方、雰囲気、構成を日本語でMarkdown形式で抽出してください。`
-    : `この動画の内容を要約してください。主要なトピック、キーポイントを日本語でMarkdown形式で抽出してください。`;
+  const prompt = mode === 'style' ? analyzePrompts.style : analyzePrompts.source;
 
   const result = await openRouter.chat.send({
     model: VIDEO_MODEL,
@@ -67,11 +62,7 @@ export async function sendChatMessage(
   messages: Array<{role: string; content: string}>,
   contextSources: string[]
 ): Promise<string> {
-  const systemPrompt = `あなたは動画制作支援AIアシスタントです。
-以下のソース情報を元に、ユーザーの質問に答えてください。
-
-ソース情報:
-${contextSources.join('\n\n---\n\n')}`;
+  const systemPrompt = chatPrompts.system(contextSources);
 
   const result = await openRouter.chat.send({
     model: CHAT_MODEL,
@@ -85,34 +76,39 @@ ${contextSources.join('\n\n---\n\n')}`;
   return (result.choices[0]?.message?.content as string) || '';
 }
 
+/**
+ * シナリオ生成（2段階思考プロセス）
+ * 1. 草案生成 → 2. 改善・洗練
+ */
 export async function generateScenario(
   styles: string[],
   sources: string[],
   chatHistory: string
 ): Promise<string> {
-  const prompt = `以下の情報を元に、YouTube動画のシナリオを作成してください。
+  // 1回目：草案生成
+  const draftPrompt = scenarioPrompts.generateDraft(styles, sources, chatHistory);
 
-スタイル情報:
-${styles.join('\n\n')}
-
-ソース情報:
-${sources.join('\n\n')}
-
-ディスカッション履歴:
-${chatHistory}
-
-これらを統合して、以下の構成でシナリオを作成してください：
-1. 導入（フック）
-2. 本論
-3. まとめ
-
-日本語でMarkdown形式で出力してください。`;
-
-  const result = await openRouter.chat.send({
+  const draftResult = await openRouter.chat.send({
     model: SCENARIO_MODEL,
-    messages: [{ role: 'user', content: prompt }],
+    messages: [{ role: 'user', content: draftPrompt }],
     stream: false,
   });
 
-  return (result.choices[0]?.message?.content as string) || '';
+  const draftScenario = (draftResult.choices[0]?.message?.content as string) || '';
+
+  // 2回目：改善・洗練（1回目の結果をコンテキストに含める）
+  const refinePrompt = scenarioPrompts.refineScenario(
+    styles,
+    sources,
+    chatHistory,
+    draftScenario
+  );
+
+  const finalResult = await openRouter.chat.send({
+    model: SCENARIO_MODEL,
+    messages: [{ role: 'user', content: refinePrompt }],
+    stream: false,
+  });
+
+  return (finalResult.choices[0]?.message?.content as string) || '';
 }
